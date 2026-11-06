@@ -16,6 +16,12 @@ Estudio de VTuber **open source** para Windows: tu avatar 3D y la producción de
 - [libobs](https://github.com/obsproject/obs-studio) (composición, audio y grabación)
 - [VRM](https://vrm.dev/) (formato de avatar 3D)
 
+## Documentación
+
+- 📘 [Guía de usuario](docs/GUIA-DE-USUARIO.md): cómo usar avat-os, qué avatares e imágenes sirven y cómo ajustar ojos, boca y cuerpo.
+- 🛠️ [Guía del programador](docs/GUIA-DEL-PROGRAMADOR.md): stack, arquitectura, módulos, protocolos internos y cómo contribuir.
+- 🗺️ [Plan de trabajo](tareas.md): fases y avance.
+
 ## Desarrollo
 
 Requisitos: Rust, Node.js 20+, Visual Studio Build Tools (C++) y WebView2.

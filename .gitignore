@@ -14,3 +14,18 @@ target/
 obs-build/
 *.mp4
 *.mkv
+# Datos que los plugins de OBS crean al ejecutarse
+rtmp-services/
+win-capture/
+text-freetype2/
+
+# Página del avatar compilada y avatares del usuario (pueden ser personales)
+avatar/dist/
+*.vrm
+
+# Motor y modelo de seguimiento facial (se descargan con npm run fetch:tracking)
+static/mediapipe/
+
+# Recursos de prueba del usuario (avatares e imágenes personales): solo se suben los LEEME.md
+/recursos/*/*
+!/recursos/*/LEEME.md

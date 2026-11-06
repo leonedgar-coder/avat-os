@@ -1,0 +1,92 @@
+{
+  "app": {
+    "language": "Language",
+    "moreInfo": "More information"
+  },
+  "preview": {
+    "label": "Preview",
+    "unavailable": "Preview unavailable",
+    "engineDown": "The video engine (libobs) did not start. Check the log."
+  },
+  "avatar": {
+    "title": "Avatar",
+    "load": "Load .vrm avatar",
+    "current": "Avatar",
+    "none": "None",
+    "dialogTitle": "Choose your avatar",
+    "dialogFilter": "VRM avatar"
+  },
+  "tracking": {
+    "label": "Face tracking",
+    "starting": "starting…",
+    "on": "on",
+    "off": "off",
+    "faceFound": "Face detected",
+    "searching": "Looking for a face…",
+    "fps": "{fps} FPS",
+    "mouth": "Mouth {value}",
+    "eyes": "Left eye {left} · right {right}",
+    "cameraError": "Could not start the camera: {error}",
+    "cameraDenied": "No permission to use the camera. Check Windows Settings → Privacy → Camera.",
+    "cameraNotFound": "No camera was found.",
+    "cameraBusy": "The camera is being used by another program (Zoom, Teams, the Camera app…). Close it and try again."
+  },
+  "lipsync": {
+    "label": "Lip sync",
+    "off": "off"
+  },
+  "expression": {
+    "label": "Expression",
+    "neutral": "😐 Neutral",
+    "happy": "😄 Happy",
+    "angry": "😠 Angry",
+    "sad": "😢 Sad",
+    "surprised": "😲 Surprised",
+    "relaxed": "😌 Relaxed"
+  },
+  "background": {
+    "label": "Background",
+    "transparent": "Transparent"
+  },
+  "scenes": {
+    "title": "Scenes",
+    "main": "Main scene",
+    "start": "Starting soon"
+  },
+  "sources": {
+    "title": "Sources",
+    "avatar": "Avatar",
+    "camera": "Camera",
+    "display": "Display",
+    "toggleVisible": "Show or hide"
+  },
+  "mixer": {
+    "title": "Audio mixer",
+    "mic": "Microphone",
+    "desktop": "Desktop audio",
+    "mute": "Mute"
+  },
+  "controls": {
+    "title": "Controls",
+    "startRecording": "Start recording",
+    "stopRecording": "Stop recording",
+    "settings": "Settings"
+  },
+  "errors": {
+    "engine_not_running": "The video engine is not running.",
+    "avatar_invalid_file": "Choose a valid .vrm file.",
+    "expression_unknown": "Unknown expression: {detail}",
+    "internal": "Internal error: {detail}"
+  },
+  "tooltips": {
+    "loadAvatar": "3D avatars in VRM format (version 0.x or 1.0). Keep them in the recursos\\avatares folder. Don’t have one? Create it for free with VRoid Studio.",
+    "tracking": "Uses your webcam so the avatar copies your head, eyes and mouth. Everything is processed on your device: the video never leaves your computer.",
+    "fps": "How many times per second your face is analyzed. Above 25 looks smooth; if it drops, add more light in front of you.",
+    "values": "What the camera measures, from 0 to 1. Mouth: 0 = closed, 1 = wide open. Eyes: 0 = open, 1 = closed. Use it to tune blinking and the mouth (user guide, section 7).",
+    "lipsync": "Will move the avatar’s mouth with your voice, using the microphone. Coming soon.",
+    "expression": "Shortcut {shortcut}: works even when avat-os is not in the foreground. Press it again to go back to neutral. Some avatars block blinking or the mouth with certain expressions.",
+    "neutral": "Clears the active expression and returns to the normal face.",
+    "background": "Background behind the avatar. It is transparent for now; soon you will be able to use a color or an image (PNG, JPG, WebP or GIF; ideally 1920×1080).",
+    "comingSoon": "Still under construction: coming in a future version."
+  }
+}

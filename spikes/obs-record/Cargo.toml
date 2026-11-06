@@ -8,7 +8,7 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [package.metadata]
-libobs-cache-dir = "../obs-build"
+libobs-cache-dir = "../../obs-build"
 
 [dependencies]
 libobs-wrapper = "10"

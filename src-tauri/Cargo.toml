@@ -8,6 +8,10 @@ edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata]
+# Caché de la descarga de OBS (ignorada por git)
+libobs-cache-dir = "../obs-build"
+
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
@@ -17,13 +21,28 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Descarga los binarios oficiales de OBS (libobs + plugins) a la carpeta target.
+cargo-obs-build = { version = "3", default-features = false }
+# Para reponer las DLL que necesita obs-browser (ver build.rs).
+ureq = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
 
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
+libobs-wrapper = "10"
+libobs-simple = "9"
+raw-window-handle = "0.6"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+tauri-plugin-dialog = "2"
+tiny_http = "0.12"
+tungstenite = "0.30"
+tauri-plugin-global-shortcut = "2"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
