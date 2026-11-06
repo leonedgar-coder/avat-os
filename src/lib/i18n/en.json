@@ -14,7 +14,9 @@
     "current": "Avatar",
     "none": "None",
     "dialogTitle": "Choose your avatar",
-    "dialogFilter": "VRM avatar"
+    "dialogFilter": "VRM avatar",
+    "loading": "loading…",
+    "ready": "ready"
   },
   "tracking": {
     "label": "Face tracking",
@@ -76,7 +78,12 @@
     "engine_not_running": "The video engine is not running.",
     "avatar_invalid_file": "Choose a valid .vrm file.",
     "expression_unknown": "Unknown expression: {detail}",
-    "internal": "Internal error: {detail}"
+    "internal": "Internal error: {detail}",
+    "calibration_no_face": "Your face was not seen during calibration. Improve the light, face the camera and try again.",
+    "calibration_eyes": "No difference was detected between open and closed eyes. Try again and keep your eyes fully closed between the two beeps.",
+    "calibration_mouth": "An open mouth was not detected. Try again and open it as wide as you can.",
+    "calibration_invalid": "The calibration values are not valid. Please repeat it.",
+    "avatar_load_failed": "Could not load the avatar: {detail}"
   },
   "tooltips": {
     "loadAvatar": "3D avatars in VRM format (version 0.x or 1.0). Keep them in the recursos\\avatares folder. Don’t have one? Create it for free with VRoid Studio.",
@@ -87,6 +94,47 @@
     "expression": "Shortcut {shortcut}: works even when avat-os is not in the foreground. Press it again to go back to neutral. Some avatars block blinking or the mouth with certain expressions.",
     "neutral": "Clears the active expression and returns to the normal face.",
     "background": "Background behind the avatar. It is transparent for now; soon you will be able to use a color or an image (PNG, JPG, WebP or GIF; ideally 1920×1080).",
-    "comingSoon": "Still under construction: coming in a future version."
+    "comingSoon": "Still under construction: coming in a future version.",
+    "calibrate": "Tunes blinking, the mouth and your straight-ahead pose to your face and camera. Requires face tracking to be on. It is saved for next time.",
+    "calibrationStart": "Takes about 15 seconds. During the eyes step two beeps will guide you, because you won’t be able to see the screen.",
+    "calibrationReset": "Deletes your calibration and goes back to the default values.",
+    "avatarStatus": "The avatar is drawn in OBS’s built-in browser. The first time, or when the computer is very busy (for example right after compiling), it can take up to a minute to appear.",
+    "calibrationAdjust": "Change eye and mouth sensitivity without repeating the calibration, with a live preview on the avatar.",
+    "calibrationRepeat": "Do the 3 calibration steps again.",
+    "eyeSensitivity": "More: the avatar closes its eyes sooner and fully with a soft blink. Less: you need to close them more (useful if the avatar squints by itself).",
+    "mouthSensitivity": "More: the mouth opens wider with little movement (if you talk with your mouth almost closed). Less: it opens less (if it looks exaggerated)."
+  },
+  "calibration": {
+    "title": "Calibration",
+    "button": "Calibrate",
+    "recalibrate": "Recalibrate",
+    "reset": "Reset",
+    "calibrated": "calibrated",
+    "notCalibrated": "not calibrated",
+    "intro": "Tune tracking to your face and camera in 3 short steps. Sit as you do when streaming, with good light.",
+    "neutral": "Step 1 of 3: look straight at the screen, eyes open and mouth closed.",
+    "eyes": "Step 2 of 3: when you hear the beep, close your eyes and keep them closed until the second beep.",
+    "mouth": "Step 3 of 3: open your mouth as wide as you can.",
+    "countdown": "Starting in {n}…",
+    "capturing": "Measuring… hold still",
+    "done": "Done! These are your values:",
+    "eyesRange": "Eyes (open → closed)",
+    "mouthRange": "Mouth (closed → open)",
+    "save": "Save",
+    "repeat": "Repeat",
+    "start": "Start",
+    "cancel": "Cancel",
+    "adjust": "Adjust",
+    "adjustTitle": "Test and adjust",
+    "faceOk": "● I see you",
+    "faceLost": "● can’t see you",
+    "adjustHelp": "Blink and talk: the avatar already uses these values. If you don’t like it, move the sliders; changes apply instantly and are not saved until you press Save.",
+    "eyesMeter": "Eyes",
+    "mouthMeter": "Mouth",
+    "legend": "Bar = what the camera measures now. Gray mark = starts closing (or opening); white mark = fully.",
+    "eyeSensitivity": "Eye sensitivity",
+    "mouthSensitivity": "Mouth sensitivity",
+    "less": "less",
+    "more": "more"
   }
 }

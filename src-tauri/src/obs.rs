@@ -22,7 +22,7 @@ use libobs_wrapper::scenes::SceneItemTrait;
 use libobs_wrapper::sources::{ObsSourceBuilder, ObsSourceRef};
 use libobs_wrapper::utils::{ObsPath, StartupInfo};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use tauri::{Manager, WebviewWindow};
+use tauri::{Emitter, Manager, WebviewWindow};
 
 use crate::avatar_server::AvatarServer;
 
@@ -53,6 +53,17 @@ fn avatar_site_dir() -> PathBuf {
     // TODO(Fase 5): empaquetarla como recurso de Tauri para el instalador.
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../avatar/dist")
 }
+
+/// Estado del avatar que informa su página: `state` = `loading` | `loaded` | `error`.
+#[derive(Clone, serde::Serialize)]
+pub struct AvatarStatus {
+    state: String,
+    detail: String,
+}
+
+/// Último estado informado (la interfaz puede abrirse después del aviso).
+#[derive(Default)]
+pub struct AvatarStatusState(pub Mutex<Option<AvatarStatus>>);
 
 /// Estado compartido con los comandos de Tauri. `None` si libobs no arrancó
 /// o si la app se está cerrando.
@@ -89,7 +100,19 @@ impl Obs {
 
         // Avatar: página web (three-vrm) como fuente de navegador transparente
         // del tamaño del lienzo, encima de la pantalla.
-        let avatar_server = AvatarServer::start(avatar_site_dir(), tracking_port)?;
+        // La página informa su estado (cargando / listo / error): se guarda y se avisa a la interfaz.
+        let app = window.app_handle().clone();
+        let on_status = Box::new(move |state: &str, detail: &str| {
+            let status = AvatarStatus { state: state.to_owned(), detail: detail.to_owned() };
+            match state {
+                "loaded" => log::info!("Avatar listo en la vista previa: {detail}"),
+                "error" => log::warn!("El avatar no se pudo cargar: {detail}"),
+                _ => log::info!("Cargando el avatar…"),
+            }
+            *app.state::<AvatarStatusState>().0.lock().unwrap() = Some(status.clone());
+            let _ = app.emit("avatar-status", status);
+        });
+        let avatar_server = AvatarServer::start(avatar_site_dir(), tracking_port, on_status)?;
         let browser = context
             .source_type("browser_source")?
             .context("OBS no tiene la fuente de navegador (obs-browser)")?;
@@ -197,6 +220,12 @@ pub fn avatar_load(state: tauri::State<'_, ObsState>, path: PathBuf) -> Result<(
         }),
         None => Err(ERR_ENGINE_NOT_RUNNING.into()),
     }
+}
+
+/// Último estado del avatar (`null` si la página todavía no informó nada).
+#[tauri::command]
+pub fn avatar_status(state: tauri::State<'_, AvatarStatusState>) -> Option<AvatarStatus> {
+    state.0.lock().ok()?.clone()
 }
 
 /// Nombre del avatar cargado (o `None`).

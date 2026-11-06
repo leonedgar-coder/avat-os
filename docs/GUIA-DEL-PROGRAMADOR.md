@@ -53,6 +53,7 @@ avat-os es una aplicación de escritorio **open source (GPL-3.0-or-later)** que 
 ┌──────────────▼──────────────────────── Núcleo Rust (src-tauri) ──────────────────┐
 │  lib.rs              arranque, comandos Tauri, cierre                              │
 │  expressions.rs      emociones VRM: atajos globales Ctrl+Shift+1…5 y botones       │
+│  calibration.rs      calibración de la persona (guardada en calibracion.json)      │
 │  obs.rs              libobs: escena, fuentes, vista previa (ventana nativa hija)   │
 │  avatar_server.rs    HTTP 127.0.0.1:<aleatorio> → avatar/dist + /model.vrm         │
 │  tracking_relay.rs   WebSocket 127.0.0.1:<aleatorio> → mensajes tracking/expression│
@@ -152,6 +153,7 @@ avat-os/
 │   ├── app.html
 │   ├── lib/tracking.ts          FaceTracker (MediaPipe) y TrackingFrame
 │   ├── lib/tooltip.ts           Tooltips accesibles (use:tooltip)
+│   ├── lib/Calibration.svelte   Asistente de calibración (3 pasos)
 │   ├── lib/i18n/                Idiomas: index.svelte.ts (t, tError, i18n) + es.json, en.json
 │   └── routes/+page.svelte      Pantalla principal
 ├── src-tauri/                   Backend Rust
@@ -163,8 +165,10 @@ avat-os/
 │       ├── lib.rs               Builder de Tauri, comandos, cierre
 │       ├── obs.rs               Motor libobs y vista previa
 │       ├── avatar_server.rs     Servidor HTTP local del avatar
+│       ├── calibration.rs       Calibración (umbrales y postura de frente)
 │       ├── expressions.rs       Emociones VRM y atajos globales
-│       └── tracking_relay.rs    WebSocket local (tracking + expresiones)
+│       ├── tracking_relay.rs    WebSocket local (tracking + expresiones)
+│       └── win_icon.rs          Ícono grande de la ventana (barra de tareas)
 ├── static/                      Archivos estáticos de la interfaz (logo, mediapipe/ ignorado)
 ├── tareas.md                    Plan de trabajo por fases
 └── LICENSE                      GPL-3.0
@@ -189,6 +193,7 @@ avat-os/
 - Escucha en `127.0.0.1:0` (puerto aleatorio), un hilo `avatar-server`.
 - Rutas: `/model.vrm` → archivo elegido por el usuario; cualquier otra → archivos de `avatar/dist/` (con `canonicalize` + `starts_with` para impedir `../`).
 - Rechaza (404) peticiones cuyo `Host` no sea exactamente `127.0.0.1:<puerto>` (anti *DNS rebinding*) y métodos distintos de GET.
+- `/status?state=loading|loaded|error&detail=…` (GET, mismo control de `Host`): la página informa su estado; `parse_status()` solo acepta esos tres estados y recorta el detalle a 300 caracteres. `obs.rs` lo guarda en `AvatarStatusState`, lo registra en el log (`Avatar listo…` / `El avatar no se pudo cargar…`) y emite el evento `avatar-status`. Prueba unitaria: `cargo test --lib avatar_server`.
 - URL de la fuente: `http://127.0.0.1:<puerto>/?v=<versión>&ws=<puerto_tracking>&id=<avatar>`; `v` cambia al cargar otro avatar para forzar la recarga; `id` es el identificador del avatar (hoy `main`).
 
 ### `src-tauri/src/tracking_relay.rs` — canal en vivo (WebSocket)
@@ -212,6 +217,19 @@ avat-os/
 - `toFrame()`: descompone la matriz (`Matrix4.decompose`) para separar rotación de escala; Euler en orden `YXZ`.
 - `onStats()` (1 Hz): FPS, cara detectada y último cuadro (el panel muestra boca y ojos para calibrar).
 - WebView2 se lanza con `--disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows` (`additionalBrowserArgs` en `tauri.conf.json`) para que el tracking no se pause si la ventana queda tapada.
+
+### `src-tauri/src/calibration.rs` + `src/lib/Calibration.svelte` — calibración
+
+- **Asistente (interfaz):** 3 capturas de `REACTION_MS + CAPTURE_MS` (0,4 + 1,5 s; los primeros 0,4 s se descartan como tiempo de reacción) tras una cuenta atrás de 3 s: de frente → ojos cerrados (entre dos pitidos de `AudioContext`, porque la persona no ve la pantalla) → boca abierta. Recibe los cuadros con `subscribe()` (`frameListeners` de `+page.svelte`).
+- **Medidas (`Levels`):** ojo abierto = percentil 90 del paso 1; ojo cerrado = mediana del paso 2; boca en reposo = percentil 90 del paso 1; boca máxima = percentil 95 del paso 3. Se guardan para poder recalcular.
+- **Umbrales (`thresholds()`)** con sensibilidad `s` de −1 a 1: `eyeOpen = abierto + (0,25 − 0,1·s)·rango`, `eyeClosed = abierto + (0,85 − 0,25·s)·rango`; `mouthClosed = reposo + 0,02`, `mouthOpen = reposo + (0,6 − 0,25·s)·rango`.
+- **Prueba y ajuste:** medidores en vivo (`{#snippet meter}`, con marcas en los dos umbrales) y deslizadores; cada cambio llama a `calibration_preview` (aplica al avatar **sin guardar**). Cancelar o cerrar el asistente sin guardar llama a `calibration_preview_end` (vuelve a lo guardado). "Ajustar" abre el asistente con `initial` = la calibración guardada (si tiene `levels`) directo en este paso. Indicador "te veo" si llegó un cuadro en los últimos 500 ms; **Empezar** se desactiva sin cara.
+- `initial` y `subscribe` se leen una sola vez (`untrack`): el asistente trabaja con su propia copia. `headOffset` y `restPos` = medianas del paso 1. Rango mínimo `MIN_RANGE` (0,08): si no, error `calibration_eyes` / `calibration_mouth`; menos de 5 cuadros → `calibration_no_face`.
+- **Va dentro del panel lateral**, no en un modal: un modal centrado quedaría bajo la vista previa nativa.
+- Se envía con `$state.snapshot()`: un proxy reactivo de Svelte no se puede copiar por la comunicación con Rust.
+- **Formato:** `levels`, `eyeSensitivity` y `mouthSensitivity` son opcionales (`#[serde(default)]`): los `calibracion.json` anteriores siguen siendo válidos. Pruebas: `cargo test --lib calibration`.
+- **Rust:** `CalibrationState::load()` lee `<app_config_dir>/calibracion.json` al arrancar (si es válido); `calibration_set` valida (valores 0–1, `eyeOpen < eyeClosed`, `mouthClosed < mouthOpen`, números finitos), guarda y publica; `calibration_reset` borra el archivo. `publish()` envía el mensaje pegajoso `calibration`.
+- **Página del avatar:** sin calibración usa `EYE_*`/`MOUTH_*`; con ella, sus umbrales, resta `headOffset` a la rotación de la cabeza y usa `restPos` fijo (sin el recentrado de 8 s).
 
 ### `src/lib/tooltip.ts` — tooltips
 
@@ -238,6 +256,7 @@ avat-os/
 - Renderer WebGL con `alpha: true` y fondo transparente; cámara a 30° de FOV en plano medio.
 - Carga VRM con `GLTFLoader` + `VRMLoaderPlugin`; `VRMUtils.rotateVRM0` para modelos 0.x; brazos bajados desde la pose en T (`restPose`).
 - Solo procesa mensajes cuyo `avatar` coincide con su `id` (regla de N avatares).
+- `reportStatus()` informa `loading` / `loaded` / `error` (con el mensaje) a `/status`. Con `v=0` (todavía no se eligió avatar) no intenta cargar `/model.vrm`.
 - `applyTracking()` si hubo datos en los últimos `TRACKING_TIMEOUT_S` (0,5 s); si no, `idle()` (respiración, balanceo, parpadeo automático) y limpia los valores del tracking.
 - `applyExpressions()` (cada cuadro, con o sin tracking): fundido exponencial (`delta * 12`, ~0,2 s) hacia la emoción activa. Cada VRM decide con `overrideBlink`/`overrideMouth` si su emoción bloquea parpadeo o boca.
 - Bucle con `THREE.Timer` (no `Clock`, obsoleto en three 0.187).
@@ -256,12 +275,18 @@ avat-os/
 | `preview_set_bounds` | `x, y: i32; width, height: u32` (px físicos) | `()` / error | `obs.rs` |
 | `avatar_load` | `path: string` (`.vrm`) | `()` / error | `obs.rs` |
 | `avatar_current` | — | `string \| null` (nombre de archivo) | `obs.rs` |
+| `avatar_status` | — | `{ state, detail } \| null` (último estado informado por la página) | `obs.rs` |
 | `tracking_update` | `frame: TrackingFrame` | `()` | `tracking_relay.rs` |
 | `expression_list` | — | `{ name, shortcut }[]` | `expressions.rs` |
 | `expression_current` | — | `string \| null` | `expressions.rs` |
+| `calibration_get` | — | `Calibration | null` | `calibration.rs` |
+| `calibration_set` | `values: Calibration` | `()` / `calibration_invalid` | `calibration.rs` |
+| `calibration_preview` | `values: Calibration` | `()` / `calibration_invalid` — aplica al avatar sin guardar | `calibration.rs` |
+| `calibration_preview_end` | — | `()` — vuelve a la calibración guardada | `calibration.rs` |
+| `calibration_reset` | — | `()` | `calibration.rs` |
 | `expression_set` | `name: string \| null`: un nombre **alterna** esa expresión (como su atajo); `null` = neutral | `()` / error si el nombre no existe | `expressions.rs` |
 
-**Eventos Rust → interfaz:** `expression-changed` (payload `string | null`), emitido tanto por los atajos como por `expression_set`.
+**Eventos Rust → interfaz:** `expression-changed` (payload `string | null`), emitido tanto por los atajos como por `expression_set`; `avatar-status` (payload `{ state: "loading" | "loaded" | "error", detail }`), cuando la página del avatar informa su estado.
 
 ### Mensajes del canal en vivo (JSON por WebSocket)
 
@@ -270,6 +295,17 @@ Todos llevan `type` y `avatar` (id de destino; la página ignora los de otro id)
 ```jsonc
 { "type": "tracking",   "avatar": "main", "frame": { /* TrackingFrame */ } }   // ~30 por segundo
 { "type": "expression", "avatar": "main", "name": "happy" }                    // null = neutral; "pegajoso"
+{ "type": "calibration", "avatar": "main", "values": { /* Calibration */ } }   // null = por defecto; "pegajoso"
+```
+
+### `Calibration` (camelCase)
+
+```jsonc
+{ "eyeOpen": 0.2, "eyeClosed": 0.51, "mouthClosed": 0.05, "mouthOpen": 0.32,
+  "headOffset": [pitch, yaw, roll],   // rad: rotación "de frente" de la persona
+  "restPos": [x, y, z],                // cm: posición de reposo de la cabeza
+  "levels": { "eyeOpen": 0.07, "eyeClosed": 0.59, "jawRest": 0.03, "jawMax": 0.51 },  // opcional
+  "eyeSensitivity": 0, "mouthSensitivity": 0 }                                     // opcionales, −1 a 1
 ```
 
 ### `TrackingFrame`
@@ -292,19 +328,21 @@ Todos llevan `type` y `avatar` (id de destino; la página ignora los de otro id)
 
 ## 7. Parámetros ajustables
 
-Valores que hoy están fijos en el código y que la **calibración** (Fase 1) pasará a la interfaz. La [guía de usuario](GUIA-DE-USUARIO.md#6-ajustes-avanzados-de-ojos-boca-y-cuerpo) explica cómo elegirlos.
+Valores que hoy están fijos en el código y que la **calibración** (Fase 1) pasará a la interfaz. La [guía de usuario](GUIA-DE-USUARIO.md#7-calibración-y-ajustes-de-ojos-boca-y-cuerpo) explica cómo elegirlos.
 
 | Constante / expresión | Archivo | Valor | Efecto |
 |---|---|---|---|
-| `EYE_OPEN` / `EYE_CLOSED` | `avatar/main.ts` | 0.20 / 0.55 | Rango del parpadeo de MediaPipe que se mapea a 0–1 |
-| `MOUTH_CLOSED` / `MOUTH_OPEN` | `avatar/main.ts` | 0.03 / 0.35 | Rango de `jawOpen` que se mapea a la expresión `aa` |
+| `EYE_OPEN` / `EYE_CLOSED` | `avatar/main.ts` | 0.20 / 0.55 | Rango del parpadeo que se mapea a 0–1 (**solo sin calibración**) |
+| `MOUTH_CLOSED` / `MOUTH_OPEN` | `avatar/main.ts` | 0.03 / 0.35 | Rango de `jawOpen` que se mapea a `aa` (**solo sin calibración**) |
+| `COUNTDOWN_S`, `REACTION_MS`, `CAPTURE_MS`, `MIN_RANGE` | `src/lib/Calibration.svelte` | 3 s · 0,4 s · 1,5 s · 0,08 | Asistente de calibración |
+| Fórmulas de `thresholds()` | `src/lib/Calibration.svelte` | ver la sección del módulo | Umbrales según medidas y sensibilidad |
 | `mouthFunnel * 1.5` | `avatar/main.ts` | 1.5 | Ganancia de la expresión `ou` |
 | `delta * 18` | `avatar/main.ts` | 18 s⁻¹ | Suavizado de cabeza y cuerpo |
 | `delta * 45` | `avatar/main.ts` | 45 s⁻¹ | Suavizado de ojos y boca |
 | `* 0.012`, tope `0.25` | `avatar/main.ts` | rad/cm | Inclinación lateral del torso |
 | `* 0.01`, tope `0.2` | `avatar/main.ts` | rad/cm | Inclinación frontal del torso |
 | Reparto del giro | `avatar/main.ts` | spine 0.15 · chest 0.15 · neck 0.3 · head 0.4 | Debe sumar 1 |
-| `delta / 8` | `avatar/main.ts` | 8 s | Recentrado de la postura de reposo |
+| `delta / 8` | `avatar/main.ts` | 8 s | Recentrado de la postura de reposo (solo sin calibración) |
 | `TRACKING_TIMEOUT_S` | `avatar/main.ts` | 0.5 s | Sin datos → animación de reposo |
 | `delta * 12` (`applyExpressions`) | `avatar/main.ts` | 12 s⁻¹ | Fundido entre expresiones (~0,2 s) |
 | `EXPRESSIONS` / `MODS` | `src-tauri/src/expressions.rs` | Ctrl+Shift+1…5 | Atajos globales de las emociones |
@@ -342,6 +380,8 @@ Todavía no hay pruebas automáticas en el repositorio (pendiente). Verificació
 | Qué | Cómo |
 |---|---|
 | Tipos de la interfaz | `npm run check` (también detecta claves de idioma inexistentes y traducciones incompletas) |
+| Calibración mejorada | Misma técnica: una "persona" que tarda 350 ms en reaccionar no altera la medida (ojo cerrado medido 0,589 de 0,59 real); el medidor en vivo se pone naranja; deslizador de ojos a +1 → vista previa con `eyeClosed` 0,511 → 0,38; Guardar incluye `levels` y sensibilidad; "Ajustar" abre directo en el ajuste; Cancelar → `calibration_preview_end` |
+| Calibración | Vite + Edge *headless* + Tauri simulado + gancho de prueba `window.__avatosTest` (**solo en modo desarrollo**, `import.meta.env.DEV`: `setTrackingOn`, `emitFrame`) con cuadros sintéticos: escenarios correcto (guarda valores y postura), ojos sin cerrar y sin cara (mensajes de error), Restablecer. En la página del avatar: una cabeza girada con `headOffset` igual se ve de frente |
 | Tooltips | Misma técnica (Vite + Edge *headless* + Tauri simulado): no aparece a los 150 ms y sí a los 550 ms, `aria-describedby` presente, Tab lo muestra y Esc lo cierra, ninguno sale de la ventana ni pisa `[data-native-overlay]`, y cambia de texto al cambiar de idioma |
 | Idiomas | Interfaz servida por Vite y abierta en Edge *headless* con la API de Tauri simulada (`window.__TAURI_INTERNALS__`); capturas en `es`/`en` y detección con `--lang=en-US`, `es-MX`, `fr-FR` (→ en, es, en) |
 | Tipos estrictos de avatar y tracking | `npx tsc --ignoreConfig --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck --lib es2022,dom avatar/main.ts src/lib/tracking.ts` |
@@ -393,6 +433,9 @@ avat-os se distribuye bajo **GPL-3.0-or-later**. Todas las dependencias son comp
 | Problema | Causa / estado |
 |---|---|
 | `cargo-obs-build` borra Qt6 y `obs-frontend-api.dll`, que obs-browser necesita (error 126 al cargar `obs-browser.dll`) | Fallo de la herramienta. `build.rs` las extrae del zip oficial de OBS 32.1.2 (SHA-256 fijado). Si cambia la versión de OBS, actualizar `OBS_VERSION`, `OBS_ZIP_URL` y `OBS_ZIP_SHA256`. Pendiente reportarlo a libobs-rs |
+| El avatar tarda en aparecer con el equipo muy cargado | Sin carga, la página del avatar dentro de OBS se conecta en 1–3 s; justo después de una compilación larga (con el analizador de Rust del editor también compilando) se midieron **73 s** hasta que CEF arrancó. El panel muestra *cargando…* mientras tanto |
+| Al cargar un avatar justo al arrancar, la página se abre dos veces seguidas | Se ven dos *Cargando* / *Avatar listo* en el log. No afecta a lo que se ve; pendiente revisar si queda un segundo renderizador de CEF activo |
+| Ícono genérico en la barra de tareas (resuelto) | Tauri solo asigna el ícono **pequeño** de la ventana; sin el grande, Windows usa el del .exe a través de su caché, que con las recompilaciones de `tauri dev` puede quedar genérica. `win_icon.rs` carga el recurso **32512** del .exe (el que incrusta tauri-build desde `icons/icon.ico`) y lo asigna con `WM_SETICON` / `ICON_BIG` al arrancar. Si cambia el identificador del recurso, actualizar `APP_ICON_ID` |
 | La app tarda ~10 s en terminar el proceso | Apagado de CEF. La ventana se oculta en ~35 ms y el apagado ocurre en segundo plano |
 | En el log: `Failed to get NVVideoEffects.dll` y `obs_frontend_add_event_callback with no callbacks` | Inofensivos: plugin de NVIDIA sin GPU NVIDIA y obs-browser sin la interfaz de OBS |
 | La RAM del navegador del avatar ronda 720 MB | Costo de CEF. Motiva la "opción B" (render nativo en Rust) |
@@ -419,4 +462,8 @@ avat-os se distribuye bajo **GPL-3.0-or-later**. Todas las dependencias son comp
 | 2026-11-06 | i18n con un sistema propio mínimo en lugar de Paraglide JS | Interfaz pequeña; sin dependencias ni paso de compilación extra; JSON estándar; tipos que detectan claves y traducciones faltantes. Migrar a Paraglide más adelante es sencillo |
 | 2026-11-06 | Errores de Rust como códigos traducidos por la interfaz | Los mensajes deben salir en el idioma del usuario |
 | 2026-11-06 | Tooltips propios con acción de Svelte, sin librería (Floating UI, Tippy) | Una sola regla especial (evitar la vista previa nativa) y pocas líneas; sin dependencias |
+| 2026-11-06 | Calibración guardada por Rust en un archivo (no `localStorage`) y enviada como mensaje pegajoso | Persistencia fiable y una sola fuente de verdad para todas las páginas de avatar |
+| 2026-11-06 | Asignar el ícono grande de la ventana con `windows-sys` | La barra de tareas no debe depender de la caché de íconos de Windows |
+| 2026-11-06 | Calibración: guardar las medidas originales + sensibilidad, y vista previa sin guardar | Ajustar sin repetir los pasos y ver el efecto antes de confirmar |
+| 2026-11-06 | Asistente dentro del panel y con pitidos | Un modal quedaría bajo la vista previa nativa; con los ojos cerrados no se puede leer |
 | 2026-11-06 | Sin enlaces dentro de los tooltips | Un tooltip no se puede pulsar ni lo recorre el lector de pantalla; la ayuda extendida irá en un botón "?" |

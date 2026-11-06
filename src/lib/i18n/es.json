@@ -14,7 +14,9 @@
     "current": "Avatar",
     "none": "Ninguno",
     "dialogTitle": "Elige tu avatar",
-    "dialogFilter": "Avatar VRM"
+    "dialogFilter": "Avatar VRM",
+    "loading": "cargando…",
+    "ready": "listo"
   },
   "tracking": {
     "label": "Tracking facial",
@@ -76,7 +78,12 @@
     "engine_not_running": "El motor de video no está activo.",
     "avatar_invalid_file": "Elige un archivo .vrm válido.",
     "expression_unknown": "Expresión desconocida: {detail}",
-    "internal": "Error interno: {detail}"
+    "internal": "Error interno: {detail}",
+    "calibration_no_face": "No se vio tu cara durante la calibración. Mejora la luz, ponte de frente a la cámara y repite.",
+    "calibration_eyes": "No se notó la diferencia entre ojos abiertos y cerrados. Repite y mantén los ojos bien cerrados entre los dos pitidos.",
+    "calibration_mouth": "No se notó la boca abierta. Repite y ábrela lo más que puedas.",
+    "calibration_invalid": "Los valores de la calibración no son válidos. Repítela.",
+    "avatar_load_failed": "No se pudo cargar el avatar: {detail}"
   },
   "tooltips": {
     "loadAvatar": "Avatares 3D en formato VRM (versión 0.x o 1.0). Guárdalos en la carpeta recursos\\avatares. ¿No tienes uno? Créalo gratis con VRoid Studio.",
@@ -87,6 +94,47 @@
     "expression": "Atajo {shortcut}: funciona aunque avat-os no esté en primer plano. Pulsa otra vez para volver a neutral. Algunos avatares bloquean el parpadeo o la boca con ciertas expresiones.",
     "neutral": "Quita la expresión activa y vuelve a la cara normal.",
     "background": "Fondo detrás del avatar. Por ahora es transparente; pronto podrás usar un color o una imagen (PNG, JPG, WebP o GIF; ideal 1920×1080).",
-    "comingSoon": "Todavía en construcción: llegará en una próxima versión."
+    "comingSoon": "Todavía en construcción: llegará en una próxima versión.",
+    "calibrate": "Ajusta el parpadeo, la boca y la postura de frente a tu cara y a tu cámara. Necesita el tracking facial encendido. Se guarda para las próximas veces.",
+    "calibrationStart": "Tarda unos 15 segundos. En el paso de los ojos te guiarán dos pitidos, porque no podrás ver la pantalla.",
+    "calibrationReset": "Borra tu calibración y vuelve a los valores por defecto.",
+    "avatarStatus": "El avatar se dibuja en el navegador interno de OBS. La primera vez, o con el equipo muy ocupado (por ejemplo justo después de compilar), puede tardar hasta un minuto en aparecer.",
+    "calibrationAdjust": "Cambia la sensibilidad de ojos y boca sin repetir la calibración, con vista previa en el avatar.",
+    "calibrationRepeat": "Vuelve a hacer los 3 pasos de la calibración.",
+    "eyeSensitivity": "Más: el avatar cierra los ojos antes y del todo con un parpadeo suave. Menos: hace falta cerrarlos más (útil si el avatar entrecierra los ojos sin querer).",
+    "mouthSensitivity": "Más: la boca se abre más con poco movimiento (si hablas con la boca casi cerrada). Menos: se abre menos (si se ve exagerada)."
+  },
+  "calibration": {
+    "title": "Calibración",
+    "button": "Calibrar",
+    "recalibrate": "Recalibrar",
+    "reset": "Restablecer",
+    "calibrated": "calibrado",
+    "notCalibrated": "sin calibrar",
+    "intro": "Ajusta el tracking a tu cara y a tu cámara en 3 pasos cortos. Siéntate como cuando transmites, con buena luz.",
+    "neutral": "Paso 1 de 3: mira la pantalla de frente, con los ojos abiertos y la boca cerrada.",
+    "eyes": "Paso 2 de 3: al oír el pitido, cierra los ojos y mantenlos cerrados hasta el segundo pitido.",
+    "mouth": "Paso 3 de 3: abre la boca lo más que puedas.",
+    "countdown": "Empieza en {n}…",
+    "capturing": "Midiendo… quédate así",
+    "done": "¡Listo! Estos son tus valores:",
+    "eyesRange": "Ojos (abierto → cerrado)",
+    "mouthRange": "Boca (cerrada → abierta)",
+    "save": "Guardar",
+    "repeat": "Repetir",
+    "start": "Empezar",
+    "cancel": "Cancelar",
+    "adjust": "Ajustar",
+    "adjustTitle": "Prueba y ajuste",
+    "faceOk": "● te veo",
+    "faceLost": "● no te veo",
+    "adjustHelp": "Parpadea y habla: el avatar ya usa estos valores. Si no te convence, mueve los deslizadores; se aplica al instante y no se guarda hasta pulsar Guardar.",
+    "eyesMeter": "Ojos",
+    "mouthMeter": "Boca",
+    "legend": "Barra = lo que mide la cámara ahora. Marca gris = empieza a cerrarse (o abrirse); marca blanca = del todo.",
+    "eyeSensitivity": "Sensibilidad de los ojos",
+    "mouthSensitivity": "Sensibilidad de la boca",
+    "less": "menos",
+    "more": "más"
   }
 }

@@ -28,7 +28,16 @@ scene.add(light, new THREE.AmbientLight(0xffffff, 0.4));
 
 let vrm: VRM | null = null;
 
+/** Informa a avat-os el estado del avatar (se muestra en el panel de la interfaz). */
+function reportStatus(state: "loading" | "loaded" | "error", detail = "") {
+  const q = new URLSearchParams({ state, detail: detail.slice(0, 300) });
+  fetch(`/status?${q}`).catch(() => {
+    /* sin servidor (p. ej. en pruebas): se ignora */
+  });
+}
+
 async function loadModel(url: string) {
+  reportStatus("loading");
   const loader = new GLTFLoader();
   loader.register((parser) => new VRMLoaderPlugin(parser));
   try {
@@ -44,8 +53,10 @@ async function loadModel(url: string) {
     const meta = loaded.meta;
     const name = meta && ("name" in meta ? meta.name : meta.title); // VRM 1.0 : VRM 0.x
     console.log(`[avat-os] Avatar cargado: ${name ?? "sin nombre"}`);
+    reportStatus("loaded", name ?? "");
   } catch (e) {
     console.error(`[avat-os] No se pudo cargar el avatar: ${e}`);
+    reportStatus("error", String(e));
   }
 }
 
@@ -105,7 +116,18 @@ interface TrackingFrame {
 /** Mensajes del canal en vivo (ver tracking_relay.rs). */
 type ChannelMessage =
   | { type: "tracking"; avatar: string; frame: TrackingFrame }
-  | { type: "expression"; avatar: string; name: string | null };
+  | { type: "expression"; avatar: string; name: string | null }
+  | { type: "calibration"; avatar: string; values: Calibration | null };
+
+/** Calibración de la persona (calibration.rs). Ángulos en rad, posiciones en cm. */
+interface Calibration {
+  eyeOpen: number;
+  eyeClosed: number;
+  mouthClosed: number;
+  mouthOpen: number;
+  headOffset: [number, number, number];
+  restPos: [number, number, number];
+}
 
 /** Identificador de este avatar (`?id=` en la URL; hoy siempre "main"). */
 const AVATAR_ID = new URLSearchParams(location.search).get("id") ?? "main";
@@ -136,25 +158,32 @@ function connectTracking() {
       lastTrackingAt = performance.now() / 1000;
     } else if (msg.type === "expression") {
       activeExpression = msg.name;
+    } else if (msg.type === "calibration") {
+      calibration = msg.values;
     }
   };
   ws.onclose = () => setTimeout(connectTracking, 1000); // reconectar
 }
 connectTracking();
 
+// Valores por defecto, usados mientras la persona no se calibre (asistente de la interfaz).
 // MediaPipe rara vez llega a 1.0 con el ojo cerrado (suele dar 0.5–0.7):
 // por debajo de EYE_OPEN el ojo queda abierto y desde EYE_CLOSED, cerrado del todo.
-// TODO(Fase 1 · calibración): ajustar estos umbrales por usuario.
 const EYE_OPEN = 0.2;
 const EYE_CLOSED = 0.55;
-function eyeClosed(score: number): number {
-  return Math.min(1, Math.max(0, (score - EYE_OPEN) / (EYE_CLOSED - EYE_OPEN)));
-}
 // Boca: por debajo de MOUTH_CLOSED queda cerrada (evita temblor) y desde MOUTH_OPEN, abierta del todo.
 const MOUTH_CLOSED = 0.03;
 const MOUTH_OPEN = 0.35;
+
+let calibration: Calibration | null = null;
+
+/** Lleva `v` del rango [from, to] a [0, 1]. */
+const remap = (v: number, from: number, to: number) => Math.min(1, Math.max(0, (v - from) / (to - from)));
+function eyeClosed(score: number): number {
+  return remap(score, calibration?.eyeOpen ?? EYE_OPEN, calibration?.eyeClosed ?? EYE_CLOSED);
+}
 function mouthOpen(jaw: number): number {
-  return Math.min(1, Math.max(0, (jaw - MOUTH_CLOSED) / (MOUTH_OPEN - MOUTH_CLOSED)));
+  return remap(jaw, calibration?.mouthClosed ?? MOUTH_CLOSED, calibration?.mouthOpen ?? MOUTH_OPEN);
 }
 
 /** Posición de reposo de la cabeza (cm) para calcular la inclinación del cuerpo. */
@@ -169,7 +198,12 @@ function applyTracking(model: VRM, delta: number, t: number): boolean {
   const k = 1 - Math.exp(-delta * 18); // más alto = responde más rápido, tiembla más
   const kEyes = 1 - Math.exp(-delta * 45); // los parpadeos duran ~150 ms: suavizado rápido
   const lerp = (a: number, b: number, f = k) => a + (b - a) * f;
-  const [pitch, yaw, roll] = target.head;
+  // Con calibración, "de frente" es la postura que tenía la persona al calibrar
+  // (corrige una cámara colocada de costado o más alta).
+  const [offPitch, offYaw, offRoll] = calibration?.headOffset ?? [0, 0, 0];
+  const pitch = target.head[0] - offPitch;
+  const yaw = target.head[1] - offYaw;
+  const roll = target.head[2] - offRoll;
   smooth.pitch = lerp(smooth.pitch, pitch);
   smooth.yaw = lerp(smooth.yaw, yaw);
   smooth.roll = lerp(smooth.roll, roll);
@@ -181,12 +215,17 @@ function applyTracking(model: VRM, delta: number, t: number): boolean {
   smooth.ou = lerp(smooth.ou, Math.min(1, target.mouthFunnel * 1.5), kEyes);
 
   // Cuerpo que acompaña: inclinación según cuánto se movió la cabeza desde su
-  // posición de reposo (que se recalcula despacio, ~8 s, mientras no haya calibración).
+  // posición de reposo. Con calibración, el reposo es fijo; sin ella, se recalcula
+  // despacio (~8 s) a partir de la postura actual.
   const [px, , pz] = target.headPos ?? [0, 0, 0];
-  if (!restPos) restPos = { x: px, z: pz };
-  const kRest = 1 - Math.exp(-delta / 8);
-  restPos.x = lerp(restPos.x, px, kRest);
-  restPos.z = lerp(restPos.z, pz, kRest);
+  if (calibration) {
+    restPos = { x: calibration.restPos[0], z: calibration.restPos[2] };
+  } else {
+    if (!restPos) restPos = { x: px, z: pz };
+    const kRest = 1 - Math.exp(-delta / 8);
+    restPos.x = lerp(restPos.x, px, kRest);
+    restPos.z = lerp(restPos.z, pz, kRest);
+  }
   const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
   smooth.leanSide = lerp(smooth.leanSide, clamp(-(px - restPos.x) * 0.012, 0.25)); // cm → rad
   smooth.leanFwd = lerp(smooth.leanFwd, clamp((pz - restPos.z) * 0.01, 0.2));
@@ -268,4 +307,7 @@ window.addEventListener("resize", () => {
 });
 
 // `?v=N` cambia cada vez que se elige otro avatar, para recargar la página.
-loadModel(`/model.vrm${location.search}`);
+// `v=0`: todavía no se eligió ninguno (no hay /model.vrm que cargar).
+if (new URLSearchParams(location.search).get("v") !== "0") {
+  loadModel(`/model.vrm${location.search}`);
+}

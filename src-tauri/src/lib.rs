@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 mod avatar_server;
+mod calibration;
 mod expressions;
 mod obs;
 mod tracking_relay;
+mod win_icon;
 
 use tauri::Manager;
 
@@ -34,11 +36,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(expressions::shortcuts_plugin())
         .manage(obs::ObsState::default())
+        .manage(obs::AvatarStatusState::default())
         .manage(expressions::ExpressionState::default())
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                win_icon::set_taskbar_icon(&window);
+            }
             let relay = tracking_relay::TrackingRelay::start()?;
             let tracking_port = relay.port();
             app.manage(tracking_relay::TrackingState(relay));
+            app.manage(calibration::CalibrationState::load(app.handle()));
+            calibration::publish(app.handle());
             expressions::register_shortcuts(app.handle());
             obs::init(app, tracking_port);
             Ok(())
@@ -58,11 +66,17 @@ pub fn run() {
             obs::preview_set_bounds,
             obs::avatar_load,
             obs::avatar_current,
+            obs::avatar_status,
             obs::obs_status,
             tracking_relay::tracking_update,
             expressions::expression_list,
             expressions::expression_current,
-            expressions::expression_set
+            expressions::expression_set,
+            calibration::calibration_get,
+            calibration::calibration_set,
+            calibration::calibration_preview,
+            calibration::calibration_preview_end,
+            calibration::calibration_reset
         ])
         .run(tauri::generate_context!())
         .expect("error al iniciar avat-os");

@@ -17,7 +17,7 @@ avat-os es un estudio para VTubers: en un solo programa tienes **tu avatar 3D qu
 4. [Avatares](#4-avatares)
 5. [Seguimiento facial (tracking)](#5-seguimiento-facial-tracking)
 6. [Expresiones y atajos de teclado](#6-expresiones-y-atajos-de-teclado)
-7. [Ajustes avanzados de ojos, boca y cuerpo](#7-ajustes-avanzados-de-ojos-boca-y-cuerpo)
+7. [Calibración y ajustes de ojos, boca y cuerpo](#7-calibración-y-ajustes-de-ojos-boca-y-cuerpo)
 8. [Fondos y objetos en pantalla](#8-fondos-y-objetos-en-pantalla)
 9. [Privacidad](#9-privacidad)
 10. [Solución de problemas](#10-solución-de-problemas)
@@ -44,7 +44,7 @@ En un portátil con Intel Iris Xe, avat-os usa aproximadamente **8 % de CPU** y 
 ## 2. Primeros pasos
 
 1. Abre avat-os.
-2. En el panel **AVATAR** (a la derecha), pulsa **Cargar avatar .vrm** y elige un avatar.
+2. En el panel **AVATAR** (a la derecha), pulsa **Cargar avatar .vrm** y elige un avatar. Junto a su nombre verás **cargando…** y luego **listo** cuando aparezca en la vista previa.
    El selector se abre directamente en la carpeta de avatares de prueba ([sección 4](#4-avatares)).
 3. Pulsa el botón **Tracking facial** (dice *apagado*). Se encenderá la luz de tu cámara.
 4. Mira a la cámara: en el panel aparecerá **Cara detectada** y tu avatar empezará a copiar tu cabeza, ojos y boca.
@@ -172,7 +172,7 @@ El avatar **siempre respira**, también con el tracking encendido. La sonrisa **
 | **Boca 0.12** | Cuánto abres la boca según la cámara (0 = cerrada, 1 = muy abierta) |
 | **Ojo izq. 0.05 · der. 0.04** | Cuánto cierras cada ojo según la cámara (0 = abierto, 1 = cerrado) |
 
-Estos tres números te sirven para afinar los ajustes de la [sección 7](#7-ajustes-avanzados-de-ojos-boca-y-cuerpo).
+Estos tres números te sirven para afinar los ajustes de la [sección 7](#7-calibración-y-ajustes-de-ojos-boca-y-cuerpo).
 
 ### Consejos para que funcione mejor
 
@@ -217,10 +217,46 @@ Tu avatar puede poner cara de alegre, enojado, triste, sorpresa o relajado. Se a
 
 ---
 
-## 7. Ajustes avanzados de ojos, boca y cuerpo
+## 7. Calibración y ajustes de ojos, boca y cuerpo
 
-> 🚧 **Por ahora estos ajustes se cambian editando un archivo.** En la Fase 1 llegará la **calibración** desde la
-> interfaz (pulsar "esta es mi cara normal" y listo). Mientras tanto, si sabes abrir un archivo de texto, puedes ajustarlos así.
+### Calibrar (recomendado)
+
+La calibración adapta el tracking **a tu cara y a tu cámara**: cuánto cierras los ojos al parpadear, cuánto abres la boca al hablar y cuál es tu postura "de frente". Si tu cámara está a un costado o más alta que la pantalla, después de calibrar el avatar mirará al frente cuando tú mires a la pantalla.
+
+1. Siéntate como cuando transmites, con buena luz de frente.
+2. En el panel **AVATAR**, junto a **Calibración**, pulsa **Calibrar** (si el tracking está apagado, se enciende solo).
+3. Arriba a la derecha del asistente verás **● te veo** (en verde) si la cámara te detecta; si dice **● no te veo**, mejora la luz o ponte de frente. **Empezar** solo se activa cuando te ve.
+4. Pulsa **Empezar** y sigue los 3 pasos. Cada uno empieza con una cuenta atrás de 3 segundos y mide durante unos 2 segundos (no te preocupes si reaccionas un poco tarde: el primer momento no se cuenta):
+   1. Mira la pantalla de frente, con los ojos abiertos y la boca cerrada.
+   2. **Al oír el primer pitido, cierra los ojos** y mantenlos cerrados **hasta el segundo pitido** (no podrás leer la pantalla, por eso los pitidos).
+   3. Abre la boca lo más que puedas. Una barra te muestra lo que mide la cámara.
+5. Llegas a **Prueba y ajuste**: el avatar **ya usa** tu calibración, aunque todavía no esté guardada. Parpadea y habla para comprobarlo.
+   - Las barras **Ojos** y **Boca** muestran lo que mide la cámara en este momento. La marca gris es donde el avatar empieza a cerrar los ojos (o a abrir la boca) y la blanca, donde lo hace del todo; la barra se pone **naranja** al pasarla.
+   - Si no te convence, mueve **Sensibilidad de los ojos** o **Sensibilidad de la boca** hacia *más* o *menos*: el avatar cambia al instante.
+6. Pulsa **Guardar**. **Repetir** vuelve a hacer los 3 pasos y **Cancelar** descarta los cambios (el avatar vuelve a lo que tenías).
+
+| Si… | Mueve… |
+|---|---|
+| El avatar no cierra del todo los ojos al parpadear | Sensibilidad de los ojos → **más** |
+| El avatar entrecierra los ojos cuando los tienes abiertos | Sensibilidad de los ojos → **menos** |
+| Al hablar, la boca del avatar casi no se mueve | Sensibilidad de la boca → **más** |
+| La boca se abre de forma exagerada | Sensibilidad de la boca → **menos** |
+
+- La calibración **se guarda** y se aplica sola cada vez que abres avat-os. El panel muestra *calibrado*.
+- Para retocar la sensibilidad más tarde **sin repetir los pasos**, pulsa **Ajustar**.
+- Para volver a los valores de fábrica, pulsa **Restablecer**.
+- Si cambias de cámara, de lugar o de lentes, vuelve a calibrar (**Recalibrar**).
+
+| Mensaje | Qué hacer |
+|---|---|
+| "No se vio tu cara durante la calibración" | Mejora la luz, ponte de frente a la cámara y repite |
+| "No se notó la diferencia entre ojos abiertos y cerrados" | Repite y mantén los ojos bien cerrados entre los dos pitidos |
+| "No se notó la boca abierta" | Repite y abre la boca lo más que puedas |
+
+### Ajustes avanzados (editando un archivo)
+
+> Solo para usuarios avanzados. **Con una calibración guardada, los valores de ojos y boca de esta sección no se usan**
+> (se usan los tuyos); siguen aplicándose los de cuerpo y suavizado. Pronto habrá deslizadores en la interfaz.
 
 ### Dónde se cambian
 
@@ -299,11 +335,12 @@ Si algo deja de funcionar, vuelve a poner los valores de la columna **Valor actu
 | **La vista previa dice "Vista previa no disponible"** | El motor de video (OBS) no arrancó. Cierra avat-os y vuelve a abrirlo; si sigue igual, revisa el mensaje en la terminal ("No se pudo iniciar libobs") |
 | **El botón Cargar avatar está gris** | Es lo mismo: el motor de video no arrancó |
 | **"Elige un archivo .vrm válido"** | El archivo no es `.vrm` o no existe. Convierte el modelo a VRM ([sección 4](#4-avatares)) |
-| **El avatar no aparece después de cargarlo** | El archivo puede estar dañado o no ser un VRM real. Prueba con un avatar de prueba incluido |
+| **El avatar no aparece después de cargarlo** | Mira el estado junto al nombre del avatar en el panel: **cargando…** = espera (la primera vez, o con el equipo muy ocupado, por ejemplo justo después de compilar, puede tardar hasta un minuto); **listo** = ya está en la escena; si aparece un **mensaje en rojo**, el archivo está dañado o no es un VRM real: prueba con un avatar de prueba incluido |
 | **"No se pudo iniciar la cámara"** | Cierra otros programas que usen la cámara (Zoom, Teams, la app Cámara) y revisa *Configuración de Windows → Privacidad → Cámara* |
 | **Buscando cara… todo el tiempo** | Mejora la luz y ponte de frente a la cámara |
-| **El avatar parpadea mal o la boca se mueve poco** | Ajusta los valores de la [sección 7](#7-ajustes-avanzados-de-ojos-boca-y-cuerpo) |
+| **El avatar parpadea mal, la boca se mueve poco o mira de costado** | Calibra (o recalibra) desde el panel; si hace falta, ajusta los valores de la [sección 7](#7-calibración-y-ajustes-de-ojos-boca-y-cuerpo) |
 | **El avatar gira hacia el lado contrario** | Avísanos con un *issue*: el comportamiento esperado es como un espejo |
+| **En la barra de tareas aparece un ícono genérico en lugar del logo** | Ya está corregido en esta versión. Si aún lo ves, cierra y vuelve a abrir avat-os |
 | **El programa tarda en cerrarse** | Es normal: la ventana se cierra al instante, pero el motor de video tarda ~10 s en apagarse en segundo plano |
 | **Un atajo `Ctrl+Shift+número` no hace nada** | Otro programa ya usa esa combinación (avat-os lo indica en la terminal: "No se pudo registrar el atajo"). Cierra ese programa o usa los botones del panel; pronto podrás elegir otros atajos |
 | **El avatar no parpadea con una expresión activa** | Lo decide el avatar: muchas expresiones bloquean el parpadeo ([sección 6](#6-expresiones-y-atajos-de-teclado)) |
@@ -314,7 +351,7 @@ Si algo deja de funcionar, vuelve a poner los valores de la columna **Valor actu
 
 Resumen del [plan completo](../tareas.md):
 
-- **Fase 1 – Avatar:** idiomas (español e inglés) y ayudas emergentes (tooltips), editor de atajos, calibración desde la interfaz, lip-sync con el micrófono, fondos y efectos.
+- **Fase 1 – Avatar:** editor de atajos, deslizadores de sensibilidad, lip-sync con el micrófono, fondos y efectos.
 - **Fase 2 – Escenas y fuentes:** cámara, captura de pantalla o ventana, imágenes, texto y **chroma key**.
 - **Fase 3 – Audio:** mezclador con micrófono y sonido del escritorio.
 - **Fase 4 – Grabación:** grabar en MP4.

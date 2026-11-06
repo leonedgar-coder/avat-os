@@ -5,6 +5,7 @@
   import { FaceTracker, type TrackingFrame } from "$lib/tracking";
   import { i18n, LOCALES, t, tError, type Locale, type MessageKey } from "$lib/i18n/index.svelte";
   import { tooltip } from "$lib/tooltip";
+  import Calibration, { type CalibrationValues } from "$lib/Calibration.svelte";
   import { onMount } from "svelte";
 
   // Datos de ejemplo: se reemplazan cuando conectemos libobs (Fase 2).
@@ -27,6 +28,8 @@
   let avatarName = $state<string | null>(null);
   // Se guarda el error original y se traduce al mostrarlo (así sigue el idioma activo).
   let avatarError = $state<unknown>(null);
+  // Estado que informa la página del avatar (dentro de OBS): cargando, listo o error.
+  let avatarStatus = $state<{ state: "loading" | "loaded" | "error"; detail: string } | null>(null);
 
   // Expresiones: atajos globales Ctrl+Shift+1…5 (en Rust) o estos botones.
   const EXPRESSION_KEYS: Record<string, MessageKey> = {
@@ -51,9 +54,16 @@
   let faceFound = $state(false);
   let trackingError = $state<unknown>(null);
   let lastFrame = $state<TrackingFrame | null>(null);
+  // Otros interesados en cada cuadro (el asistente de calibración).
+  const frameListeners = new Set<(frame: TrackingFrame) => void>();
+  function subscribeFrames(fn: (frame: TrackingFrame) => void) {
+    frameListeners.add(fn);
+    return () => frameListeners.delete(fn);
+  }
   const tracker = new FaceTracker(
     (frame: TrackingFrame) => {
       invoke("tracking_update", { frame }).catch(() => {});
+      for (const fn of frameListeners) fn(frame);
     },
     (stats) => {
       trackingFps = stats.fps;
@@ -61,6 +71,42 @@
       lastFrame = stats.last;
     },
   );
+
+  // Solo en desarrollo (Vite lo elimina de la versión final): permite a las pruebas
+  // automáticas simular el tracking sin cámara ni cara real.
+  if (import.meta.env.DEV) {
+    (window as unknown as Record<string, unknown>).__avatosTest = {
+      setTrackingOn: (on: boolean) => (trackingOn = on),
+      emitFrame: (frame: TrackingFrame) => frameListeners.forEach((fn) => fn(frame)),
+    };
+  }
+
+  // Calibración: el asistente necesita el tracking encendido (lo enciende si hace falta).
+  let calibrating = $state(false);
+  let savedCalibration = $state<CalibrationValues | null>(null);
+  const calibrated = $derived(savedCalibration !== null);
+  // "Ajustar" abre el asistente directo en "Prueba y ajuste" (solo si tiene sus medidas).
+  let adjusting = $state(false);
+  let calibrationError = $state<unknown>(null);
+  async function refreshCalibration() {
+    savedCalibration = await invoke<CalibrationValues | null>("calibration_get").catch(() => null);
+  }
+  async function startCalibration(adjust = false) {
+    calibrationError = null;
+    if (!trackingOn) await toggleTracking();
+    if (trackingOn) {
+      adjusting = adjust;
+      calibrating = true;
+    }
+  }
+  async function resetCalibration() {
+    try {
+      await invoke("calibration_reset");
+      savedCalibration = null;
+    } catch (e) {
+      calibrationError = e;
+    }
+  }
 
   /** Errores comunes de getUserMedia con un mensaje claro; los demás, con el texto técnico. */
   function cameraErrorText(e: unknown): string {
@@ -101,6 +147,7 @@
     });
     if (typeof path !== "string") return;
     try {
+      avatarStatus = { state: "loading", detail: "" };
       await invoke("avatar_load", { path });
       avatarName = path.split(/[\\/]/).pop() ?? path;
       avatarError = null;
@@ -125,6 +172,12 @@
 
   onMount(() => {
     invoke<string>("app_version").then((v) => (version = v)).catch(() => (version = "dev"));
+    refreshCalibration();
+    invoke<typeof avatarStatus>("avatar_status")
+      .then((st) => st && (avatarStatus = st))
+      .catch(() => {});
+    const unlistenStatus = listen<NonNullable<typeof avatarStatus>>("avatar-status", (e) => (avatarStatus = e.payload))
+      .catch(() => () => {});
     invoke<{ name: string; shortcut: string }[]>("expression_list")
       .then((list) => (expressions = list))
       .catch((e) => console.error("expression_list:", e));
@@ -154,6 +207,7 @@
       observer.disconnect();
       window.removeEventListener("resize", syncPreview);
       unlistenExpression.then((off) => off());
+      unlistenStatus.then((off) => off());
     };
   });
 </script>
@@ -195,8 +249,21 @@
       </button>
       <div class="field">
         <span>{t("avatar.current")}</span>
-        <span class="name" title={avatarName ?? ""}>{avatarName ?? t("avatar.none")}</span>
+        <span class="avatar-value">
+          {#if avatarName}
+            {@const st = avatarStatus?.state ?? "loading"}
+            {#if st !== "error"}
+              <span class="pill" class:on-pill={st === "loaded"} use:tooltip={t("tooltips.avatarStatus")}>
+                {st === "loaded" ? t("avatar.ready") : t("avatar.loading")}
+              </span>
+            {/if}
+          {/if}
+          <span class="name" title={avatarName ?? ""}>{avatarName ?? t("avatar.none")}</span>
+        </span>
       </div>
+      {#if avatarStatus?.state === "error"}
+        <p class="error">{t("errors.avatar_load_failed", { detail: avatarStatus.detail })}</p>
+      {/if}
       {#if avatarError}<p class="error">{tError(avatarError)}</p>{/if}
       <div class="field">
         <span>{t("tracking.label")}</span>
@@ -230,6 +297,50 @@
         {/if}
       {/if}
       {#if trackingError}<p class="error">{cameraErrorText(trackingError)}</p>{/if}
+      <div class="field">
+        <span>
+          {t("calibration.title")}
+          <span class="pill" class:on-pill={calibrated}>
+            {calibrated ? t("calibration.calibrated") : t("calibration.notCalibrated")}
+          </span>
+        </span>
+        <span class="cal-actions">
+          {#if savedCalibration?.levels}
+            <button
+              class="link"
+              onclick={() => startCalibration(true)}
+              disabled={calibrating || trackingBusy}
+              use:tooltip={t("tooltips.calibrationAdjust")}
+            >
+              {t("calibration.adjust")}
+            </button>
+          {/if}
+          {#if calibrated}
+            <button class="link" onclick={resetCalibration} use:tooltip={t("tooltips.calibrationReset")}>
+              {t("calibration.reset")}
+            </button>
+          {/if}
+          <button
+            class="link"
+            onclick={() => startCalibration(false)}
+            disabled={calibrating || trackingBusy}
+            use:tooltip={t("tooltips.calibrate")}
+          >
+            {calibrated ? t("calibration.recalibrate") : t("calibration.button")}
+          </button>
+        </span>
+      </div>
+      {#if calibrating}
+        <Calibration
+          subscribe={subscribeFrames}
+          initial={adjusting ? savedCalibration : null}
+          onclose={() => {
+            calibrating = false;
+            refreshCalibration();
+          }}
+        />
+      {/if}
+      {#if calibrationError}<p class="error">{tError(calibrationError)}</p>{/if}
       <div class="field">
         <span>{t("lipsync.label")} <button type="button" class="info" aria-label={t("app.moreInfo")} use:tooltip={t("tooltips.lipsync")}>ⓘ</button></span>
         <span class="pill off">{t("lipsync.off")}</span>
@@ -424,6 +535,14 @@
   .pill.toggle { border: 1px solid var(--border); font: inherit; font-size: 12px; cursor: pointer; }
   .pill.toggle.on { background: linear-gradient(90deg, var(--orange), var(--purple)); color: #fff; border-color: transparent; }
   .field.sub { font-size: 12px; color: var(--muted); padding-top: 4px; }
+  .pill.on-pill { color: var(--orange); }
+  .cal-actions { display: flex; gap: 8px; }
+  .link {
+    border: 0; background: transparent; padding: 0; color: var(--purple);
+    font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline;
+  }
+  .link:hover { color: var(--orange); }
+  .link:disabled { color: var(--muted); cursor: not-allowed; text-decoration: none; }
   .expressions { padding: 8px 0; border-bottom: 1px solid var(--border); }
   .expressions .label { display: block; margin-bottom: 6px; }
   .expr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
@@ -482,6 +601,7 @@
     cursor: pointer;
   }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .avatar-value { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .error { color: var(--danger); font-size: 12px; margin: 6px 0; }
   .btn.ghost { background: transparent; border-color: var(--border); color: var(--text); }

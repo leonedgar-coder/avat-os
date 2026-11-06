@@ -87,12 +87,18 @@ Antes de construir encima, comprobar que las piezas difíciles funcionan juntas.
 ### Avatar
 
 - [ ] Cargar archivo `.vrm` (selector de archivo ✅ + avatares recientes)
+  - [x] Estado del avatar en el panel (*cargando…* / *listo* / error con el motivo), informado por la página del avatar
+  - [ ] Revisar la doble carga de la página al cargar el avatar justo al arrancar
 - [ ] Postura idle: respiración, parpadeo automático, balanceo leve (versión básica ✅ en [avatar/main.ts](avatar/main.ts))
 - [ ] Tracking: rotación de cabeza, mirada, parpadeo, boca abierta/cerrada
 - [ ] **Cuerpo que acompaña a la cabeza** (con la misma cámara, sin tracking de cuerpo): el torso comparte los giros de la cabeza, se inclina cuando te inclinas o te acercas a la cámara (posición de la cabeza que da MediaPipe) y respira también durante el tracking; así se luce la física de pelo y ropa del VRM
   - [x] Primera versión en [avatar/main.ts](avatar/main.ts): giro repartido columna 15 % · pecho 15 % · cuello 30 % · cabeza 40 %; inclinación lateral y hacia adelante según la posición de la cabeza (el reposo se recalcula solo en ~8 s hasta que exista la calibración)
   - [ ] Probar con cámara y ajustar intensidades
-- [ ] Calibración (pose neutra, umbrales de ojos y boca por usuario) y suavizado (filtro anti-temblor)
+- [x] Calibración desde la interfaz: asistente de 3 pasos (de frente · ojos cerrados guiado por pitidos · boca abierta) que calcula los umbrales de ojos y boca, la postura "de frente" (corrige una cámara de costado) y el reposo del cuerpo; se guarda en `%APPDATA%\com.avatos.app\calibracion.json` → [src/lib/Calibration.svelte](src/lib/Calibration.svelte), [src-tauri/src/calibration.rs](src-tauri/src/calibration.rs)
+  - [ ] Probar con el usuario y su cámara
+  - [x] Mejoras: descarta el tiempo de reacción (0,4 s), indicador "te veo", medidores en vivo, pantalla **Prueba y ajuste** con vista previa en el avatar sin guardar, y deslizadores de sensibilidad de ojos y boca; botón **Ajustar** para retocar sin repetir los pasos (se guardan las medidas originales)
+  - [ ] Calibración por ojo (izquierdo y derecho por separado) si los guiños se detectan desparejos
+- [ ] Suavizado avanzado (filtro anti-temblor tipo One Euro) si el tracking tiembla con poca luz
   - Hoy, fijos en [avatar/main.ts](avatar/main.ts): ojos 0.20 → 0.55, boca 0.03 → 0.35. El panel muestra los valores reales de MediaPipe para ajustarlos
   - La sonrisa ya **no** activa la expresión "alegre": en muchos VRM las emociones bloquean el parpadeo y la boca (`overrideBlink`/`overrideMouth`); las emociones irán por atajos
 - [ ] Lip-sync por micrófono (volumen → boca; luego vocales A-I-U-E-O)
