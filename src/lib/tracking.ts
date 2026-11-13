@@ -15,11 +15,22 @@ export interface TrackingFrame {
   head: [number, number, number];
   /** Posición de la cabeza respecto de la cámara, en cm: [x (derecha), y (arriba), z (hacia la cámara)]. */
   headPos: [number, number, number];
+  /**
+   * Mirada: [horizontal, vertical], aproximadamente de −1 a 1. Horizontal positivo =
+   * mirar hacia tu izquierda (el mismo sentido que girar la cabeza hacia tu izquierda);
+   * vertical positivo = mirar hacia arriba.
+   */
+  gaze: [number, number];
   blinkLeft: number;
   blinkRight: number;
   jawOpen: number;
   mouthFunnel: number;
   smile: number;
+  /**
+   * Cuándo se midió (segundos, reloj de la interfaz). El anti-temblor del avatar lo usa
+   * en lugar de la hora de llegada, que se desordena en el camino interfaz → Rust → avatar.
+   */
+  time: number;
 }
 
 export interface TrackerStats {
@@ -92,7 +103,7 @@ export class FaceTracker {
         this.frames++;
         if (now - this.lastSent >= SEND_INTERVAL_MS) {
           this.lastSent = now;
-          this.lastFrame = toFrame(shapes, matrix);
+          this.lastFrame = toFrame(shapes, matrix, now / 1000);
           this.onFrame(this.lastFrame);
         }
       }
@@ -136,7 +147,7 @@ const _q = new Quaternion();
 const _s = new Vector3();
 const _e = new Euler();
 
-function toFrame(shapes: { categoryName: string; score: number }[], matrix: number[]): TrackingFrame {
+function toFrame(shapes: { categoryName: string; score: number }[], matrix: number[], time: number): TrackingFrame {
   const s: Record<string, number> = {};
   for (const c of shapes) s[c.categoryName] = c.score;
 
@@ -146,8 +157,14 @@ function toFrame(shapes: { categoryName: string; score: number }[], matrix: numb
   const e = _e.setFromQuaternion(_q, "YXZ");
 
   return {
+    time,
     head: [e.x, e.y, e.z],
     headPos: [_p.x, _p.y, _p.z],
+    // Hacia tu izquierda: el ojo izquierdo mira "afuera" y el derecho "adentro".
+    gaze: [
+      ((s.eyeLookOutLeft ?? 0) + (s.eyeLookInRight ?? 0) - (s.eyeLookInLeft ?? 0) - (s.eyeLookOutRight ?? 0)) / 2,
+      ((s.eyeLookUpLeft ?? 0) + (s.eyeLookUpRight ?? 0) - (s.eyeLookDownLeft ?? 0) - (s.eyeLookDownRight ?? 0)) / 2,
+    ],
     blinkLeft: s.eyeBlinkLeft ?? 0,
     blinkRight: s.eyeBlinkRight ?? 0,
     jawOpen: s.jawOpen ?? 0,

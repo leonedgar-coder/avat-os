@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo.png" width="200" alt="avat-os"></p>
+<p align="center"><img src="assets/logo.svg" width="200" alt="avat-os"></p>
 
 # avat-os
 

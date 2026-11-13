@@ -25,6 +25,7 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::{Emitter, Manager, WebviewWindow};
 
 use crate::avatar_server::AvatarServer;
+use crate::recent_avatars;
 
 // Códigos de error para la interfaz (los traduce `errors.*` en src/lib/i18n/*.json).
 // Los demás errores se envían como `internal: <detalle>`.
@@ -50,7 +51,7 @@ pub struct Obs {
 
 /// Carpeta con la página compilada del avatar (`npm run build:avatar`).
 fn avatar_site_dir() -> PathBuf {
-    // TODO(Fase 5): empaquetarla como recurso de Tauri para el instalador.
+    // TODO(Fase 6): empaquetarla como recurso de Tauri para el instalador.
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../avatar/dist")
 }
 
@@ -74,7 +75,14 @@ impl Obs {
     /// Arranca libobs y crea la vista previa dentro de `window`.
     /// `config_dir` es donde los plugins de OBS guardan sus datos (fuera del proyecto).
     /// `tracking_port` es el canal por el que la página del avatar recibe el tracking.
-    pub fn start(window: &WebviewWindow, config_dir: &Path, tracking_port: u16) -> anyhow::Result<Self> {
+    /// `initial_avatar`: avatar con el que se crea la página (el último usado), así
+    /// carga una sola vez en lugar de cargar vacía y recargarse con el modelo.
+    pub fn start(
+        window: &WebviewWindow,
+        config_dir: &Path,
+        tracking_port: u16,
+        initial_avatar: Option<PathBuf>,
+    ) -> anyhow::Result<Self> {
         let video = ObsVideoInfoBuilder::new()
             .base_width(CANVAS_WIDTH)
             .base_height(CANVAS_HEIGHT)
@@ -103,6 +111,16 @@ impl Obs {
         // La página informa su estado (cargando / listo / error): se guarda y se avisa a la interfaz.
         let app = window.app_handle().clone();
         let on_status = Box::new(move |state: &str, detail: &str| {
+            // Fondo de video: se reproduce o no (p. ej. un códec que el navegador de OBS no tiene).
+            if let Some(bg) = state.strip_prefix("bg_") {
+                if bg == "error" {
+                    log::warn!("El video de fondo no se puede reproducir (código {detail})");
+                } else {
+                    log::info!("Video de fondo reproduciéndose");
+                }
+                let _ = app.emit("background-status", serde_json::json!({ "state": bg, "detail": detail }));
+                return;
+            }
             let status = AvatarStatus { state: state.to_owned(), detail: detail.to_owned() };
             match state {
                 "loaded" => log::info!("Avatar listo en la vista previa: {detail}"),
@@ -113,12 +131,18 @@ impl Obs {
             let _ = app.emit("avatar-status", status);
         });
         let avatar_server = AvatarServer::start(avatar_site_dir(), tracking_port, on_status)?;
+        let mut avatar_version = 0;
+        if let Some(path) = initial_avatar.filter(|p| recent_avatars::is_vrm_file(p)) {
+            log::info!("Avatar al arrancar: {}", path.display());
+            avatar_server.set_model(path);
+            avatar_version = 1;
+        }
         let browser = context
             .source_type("browser_source")?
             .context("OBS no tiene la fuente de navegador (obs-browser)")?;
         let mut settings = browser.default_settings_mut()?;
         settings
-            .set_string("url", avatar_server.url(0).as_str())?
+            .set_string("url", avatar_server.url(avatar_version).as_str())?
             .set_bool("is_local_file", false)?
             .set_int("width", CANVAS_WIDTH as i64)?
             .set_int("height", CANVAS_HEIGHT as i64)?
@@ -151,17 +175,13 @@ impl Obs {
             display,
             avatar,
             avatar_server,
-            avatar_version: 0,
+            avatar_version,
             context,
         })
     }
 
     fn load_avatar(&mut self, path: PathBuf) -> anyhow::Result<()> {
-        let is_vrm = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("vrm"));
-        if !is_vrm || !path.is_file() {
+        if !recent_avatars::is_vrm_file(&path) {
             anyhow::bail!(ERR_AVATAR_INVALID_FILE);
         }
         self.avatar_server.set_model(path);
@@ -170,6 +190,11 @@ impl Obs {
         settings.set_string("url", self.avatar_server.url(self.avatar_version).as_str())?;
         self.avatar.update_settings(settings)?;
         Ok(())
+    }
+
+    /// Imagen que el servidor del avatar entrega en `/background` (`None` = ninguna).
+    pub fn set_background_image(&self, path: Option<PathBuf>) {
+        self.avatar_server.set_background(path);
     }
 
     fn set_bounds(&mut self, x: i32, y: i32, width: u32, height: u32) -> anyhow::Result<()> {
@@ -209,17 +234,18 @@ pub fn preview_set_bounds(
     }
 }
 
-/// Carga un avatar `.vrm` en la fuente "Avatar".
+/// Carga un avatar `.vrm` en la fuente "Avatar" y lo anota en los recientes.
 #[tauri::command]
-pub fn avatar_load(state: tauri::State<'_, ObsState>, path: PathBuf) -> Result<(), String> {
+pub fn avatar_load(app: tauri::AppHandle, state: tauri::State<'_, ObsState>, path: PathBuf) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|e| format!("internal: {e}"))?;
-    match guard.as_mut() {
-        Some(obs) => obs.load_avatar(path).map_err(|e| {
-            let msg = format!("{e:#}");
-            if msg == ERR_AVATAR_INVALID_FILE { msg } else { format!("internal: {msg}") }
-        }),
-        None => Err(ERR_ENGINE_NOT_RUNNING.into()),
-    }
+    let obs = guard.as_mut().ok_or_else(|| ERR_ENGINE_NOT_RUNNING.to_string())?;
+    obs.load_avatar(path.clone()).map_err(|e| {
+        let msg = format!("{e:#}");
+        if msg == ERR_AVATAR_INVALID_FILE { msg } else { format!("internal: {msg}") }
+    })?;
+    drop(guard);
+    recent_avatars::remember(&app, &path);
+    Ok(())
 }
 
 /// Último estado del avatar (`null` si la página todavía no informó nada).
@@ -232,6 +258,11 @@ pub fn avatar_status(state: tauri::State<'_, AvatarStatusState>) -> Option<Avata
 #[tauri::command]
 pub fn avatar_current(state: tauri::State<'_, ObsState>) -> Option<String> {
     state.0.lock().ok()?.as_ref()?.avatar_server.model_name()
+}
+
+/// Ruta del avatar cargado (para marcar *en uso* en los recientes).
+pub fn current_avatar_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    app.state::<ObsState>().0.lock().ok()?.as_ref()?.avatar_server.model_path()
 }
 
 /// ¿Arrancó libobs?
@@ -254,14 +285,12 @@ pub fn init(app: &tauri::App, tracking_port: u16) {
             return;
         }
     };
-    match Obs::start(&window, &config_dir, tracking_port) {
-        Ok(mut obs) => {
-            // Desarrollo: `AVATOS_VRM=ruta\al\avatar.vrm` lo carga al arrancar.
-            if let Some(path) = std::env::var_os("AVATOS_VRM") {
-                if let Err(e) = obs.load_avatar(PathBuf::from(path)) {
-                    log::error!("AVATOS_VRM: {e:#}");
-                }
-            }
+    // Avatar inicial: `AVATOS_VRM=ruta\al\avatar.vrm` (desarrollo) o el último usado.
+    let initial = std::env::var_os("AVATOS_VRM")
+        .map(PathBuf::from)
+        .or_else(|| app.state::<recent_avatars::RecentAvatarsState>().last_existing());
+    match Obs::start(&window, &config_dir, tracking_port, initial) {
+        Ok(obs) => {
             *app.state::<ObsState>().0.lock().unwrap() = Some(obs);
         }
         Err(e) => log::error!("No se pudo iniciar libobs: {e:#}"),

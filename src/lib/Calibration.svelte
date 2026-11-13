@@ -15,19 +15,27 @@
 <script lang="ts" module>
   /** Medidas de MediaPipe en cada paso (0–1). */
   export interface Levels {
+    /** Ojo izquierdo (o los dos, en calibraciones antiguas sin `eyeRight`). */
     eyeOpen: number;
     eyeClosed: number;
     jawRest: number;
     jawMax: number;
+    /** Ojo derecho [abierto, cerrado]. */
+    eyeRight?: [number, number] | null;
+    /** Temblor del valor de cada ojo abierto [izq., der.] (paso 1). */
+    eyeNoise?: [number, number] | null;
   }
   /** Lo que se guarda (calibration.rs). */
   export interface CalibrationValues {
     eyeOpen: number;
     eyeClosed: number;
+    /** Umbrales del ojo derecho [abierto, cerrado] (sin esto, los mismos que el izquierdo). */
+    eyeRight?: [number, number] | null;
     mouthClosed: number;
     mouthOpen: number;
     headOffset: [number, number, number];
     restPos: [number, number, number];
+    gazeOffset?: [number, number];
     levels?: Levels | null;
     eyeSensitivity?: number;
     mouthSensitivity?: number;
@@ -65,10 +73,41 @@
   const COUNTDOWN_S = 3;
   const REACTION_MS = 400; // se descartan: es lo que tarda una persona en reaccionar
   const CAPTURE_MS = 1500; // lo que se mide después de la reacción
-  const MIN_RANGE = 0.08; // diferencia mínima entre abierto y cerrado para aceptar la medición
+  const MIN_RANGE = 0.08; // boca: diferencia mínima entre cerrada y abierta para aceptar la medición
+  /**
+   * Ojos: la diferencia entre abiertos y cerrados (promedio de los dos) tiene que ser al menos
+   * NOISE_FACTOR veces lo que tiembla el valor con los ojos abiertos, y nunca menos de
+   * MIN_EYE_DIFF. Antes era un 0,08 fijo: a personas cuyo "parpadeo" de MediaPipe cambia poco
+   * (p. ej. 0,18 → 0,27) les fallaba aunque cerraran bien los ojos, y con una señal limpia
+   * una diferencia chica sí se distingue.
+   */
+  const NOISE_FACTOR = 4;
+  const MIN_EYE_DIFF = 0.03;
+  /** Por ojo: menos que esto (o que el ruido de ese ojo × NOISE_FACTOR) → usa el promedio. */
+  const MIN_EYE_RANGE = 0.02;
+  /** Desde aquí hacia abajo la señal de los ojos es pequeña: se guarda, pero con un aviso. */
+  const SMALL_EYE_SIGNAL = 0.06;
+  /** Suelo del temblor medido (la señal de MediaPipe tiene esta resolución en la práctica). */
+  const NOISE_FLOOR = 0.002;
   const FACE_TIMEOUT_MS = 500;
 
   let step = $state<Step>(opened?.levels ? "adjust" : "intro");
+  /**
+   * Cada paso espera a que la persona pulse "Empezar el paso N": así tiene tiempo de leer
+   * la instrucción (antes los 3 pasos seguían solos y no se alcanzaba a leer).
+   */
+  let waiting = $state(false);
+  let go: (() => void) | null = null;
+  function waitForGo(): Promise<void> {
+    waiting = true;
+    return new Promise((resolve) => {
+      go = () => {
+        waiting = false;
+        go = null;
+        resolve();
+      };
+    });
+  }
   let countdown = $state(0);
   let capturing = $state(false);
   let error = $state<unknown>(null);
@@ -76,9 +115,20 @@
 
   // Resultado: medidas + postura (del asistente o de la calibración guardada).
   let levels = $state<Levels | null>(opened?.levels ?? null);
+  /**
+   * La señal de los ojos es pequeña (aviso en "Prueba y ajuste"): se calcula de las medidas,
+   * así también aparece al abrir directo en el ajuste con una calibración guardada.
+   */
+  const smallEyeSignal = $derived.by(() => {
+    if (!levels) return false;
+    const right = levels.eyeRight ?? [levels.eyeOpen, levels.eyeClosed];
+    return (levels.eyeClosed - levels.eyeOpen + right[1] - right[0]) / 2 < SMALL_EYE_SIGNAL;
+  });
   let headOffset = $state<[number, number, number]>(opened?.headOffset ?? [0, 0, 0]);
   let restPos = $state<[number, number, number]>(opened?.restPos ?? [0, 0, -50]);
+  let gazeOffset = $state<[number, number]>(opened?.gazeOffset ?? [0, 0]);
   let eyeSensitivity = $state(opened?.eyeSensitivity ?? 0);
+
   let mouthSensitivity = $state(opened?.mouthSensitivity ?? 0);
 
   // --- Lectura en vivo (para los medidores y el indicador "te veo") ---------
@@ -91,7 +141,8 @@
   });
   const ticker = setInterval(() => (now = performance.now()), 100);
   const faceVisible = $derived(live !== null && now - lastFrameAt < FACE_TIMEOUT_MS);
-  const liveEye = $derived(live ? (live.blinkLeft + live.blinkRight) / 2 : 0);
+  const liveEyeL = $derived(live?.blinkLeft ?? 0);
+  const liveEyeR = $derived(live?.blinkRight ?? 0);
   const liveJaw = $derived(live?.jawOpen ?? 0);
 
   // --- Cálculo de umbrales ---------------------------------------------------
@@ -102,12 +153,31 @@
    * sensibilidad = antes). Boca: abierta del todo al 60 % de tu máximo (al hablar casi
    * nunca se abre del todo; más sensibilidad = con menos apertura).
    */
+  /**
+   * Margen mínimo (en valores de MediaPipe) entre el ojo abierto medido y donde empieza a
+   * cerrarse, y entre ese punto y el cierre total. Con un rango de ojos estrecho, el 25 %
+   * quedaba a 0,02 del ojo abierto y el ruido de la cámara lo cruzaba (parpadeos falsos).
+   */
+  const EYE_MARGIN = 0.03;
+  function eyeThresholds(open: number, closed: number, eyeSens: number, noise = 0): [number, number] {
+    const range = closed - open;
+    // Margen: lo que tiembla el ojo abierto (×3) o EYE_MARGIN, lo mayor; pero nunca más del
+    // 40 % del rango: con un rango estrecho, el "cerrado del todo" quedaría más allá de lo que
+    // ese ojo llega y el avatar no lo cerraría nunca.
+    const margin = Math.min(Math.max(EYE_MARGIN, 3 * noise), 0.4 * range);
+    const start = Math.max(open + (0.25 - 0.1 * eyeSens) * range, open + margin);
+    const end = Math.max(open + (0.85 - 0.25 * eyeSens) * range, start + margin);
+    return [clamp01(start), clamp01(end)];
+  }
   function thresholds(l: Levels, eyeSens: number, mouthSens: number) {
-    const eyeRange = l.eyeClosed - l.eyeOpen;
+    const [noiseL, noiseR] = l.eyeNoise ?? [0, 0];
+    const [eyeOpen, eyeClosed] = eyeThresholds(l.eyeOpen, l.eyeClosed, eyeSens, noiseL);
     const jawRange = l.jawMax - l.jawRest;
     return {
-      eyeOpen: clamp01(l.eyeOpen + (0.25 - 0.1 * eyeSens) * eyeRange),
-      eyeClosed: clamp01(l.eyeOpen + (0.85 - 0.25 * eyeSens) * eyeRange),
+      eyeOpen,
+      eyeClosed,
+      // Cada ojo con sus umbrales: la cámara suele ver uno más cerrado que el otro.
+      eyeRight: l.eyeRight ? eyeThresholds(l.eyeRight[0], l.eyeRight[1], eyeSens, noiseR) : null,
       mouthClosed: clamp01(l.jawRest + 0.02),
       mouthOpen: clamp01(l.jawRest + (0.6 - 0.25 * mouthSens) * jawRange),
     };
@@ -117,6 +187,7 @@
       ...thresholds(levels, eyeSensitivity, mouthSensitivity),
       headOffset,
       restPos,
+      gazeOffset,
       levels,
       eyeSensitivity,
       mouthSensitivity,
@@ -178,32 +249,86 @@
     return s.length ? s[Math.min(s.length - 1, Math.floor(s.length * p))] : NaN;
   };
   const median = (v: number[]) => percentile(v, 0.5);
+  /** Desvío robusto (mediana de las desviaciones × 1,4826): un pestañeo suelto no lo infla. */
+  const robustSigma = (v: number[]) => {
+    const m = median(v);
+    return Math.max(NOISE_FLOOR, 1.4826 * median(v.map((x) => Math.abs(x - m))));
+  };
+  const n2 = (v: number) => v.toFixed(2);
+  /** Error del paso de los ojos con lo medido: el texto se arma al mostrarlo (idioma actual). */
+  interface EyesError {
+    code: "calibration_eyes";
+    numbers: Record<string, string>;
+  }
+  function errorText(e: unknown): string {
+    const ee = e as Partial<EyesError> | null;
+    if (ee && typeof ee === "object" && ee.code === "calibration_eyes" && ee.numbers) {
+      return t("errors.calibration_eyes", { detail: t("calibration.eyesNumbers", ee.numbers) });
+    }
+    return tError(e);
+  }
+  const n3 = (v: number) => v.toFixed(3);
 
   async function run() {
     error = null;
     if (step === "adjust") invoke("calibration_preview_end").catch(() => {}); // repetir: sin vista previa
     try {
       step = "neutral";
+      await waitForGo();
       const neutral = await capture(false);
       step = "eyes";
+      await waitForGo();
       const eyes = await capture(true);
       step = "mouth";
+      await waitForGo();
       const mouth = await capture(false);
       if (neutral.length < 5 || eyes.length < 5 || mouth.length < 5) throw "calibration_no_face";
 
+      // Cada ojo por separado. Abierto: un valor alto pero no el máximo (un pestañeo
+      // suelto no lo arruina).
+      const eyeOpenL = percentile(neutral.map((f) => f.blinkLeft), 0.9);
+      const eyeOpenR = percentile(neutral.map((f) => f.blinkRight), 0.9);
+      const eyeClosedL = median(eyes.map((f) => f.blinkLeft));
+      const eyeClosedR = median(eyes.map((f) => f.blinkRight));
+      // Cuánto tiembla cada ojo abierto (paso 1).
+      const noiseL = robustSigma(neutral.map((f) => f.blinkLeft));
+      const noiseR = robustSigma(neutral.map((f) => f.blinkRight));
+      // El paso vale si el promedio de los dos ojos cambia claramente más que su temblor.
+      const avgOpen = (eyeOpenL + eyeOpenR) / 2;
+      const avgClosed = (eyeClosedL + eyeClosedR) / 2;
+      const avgNoise = (noiseL + noiseR) / 2;
+      const needed = Math.max(MIN_EYE_DIFF, NOISE_FACTOR * avgNoise);
+      const diff = avgClosed - avgOpen;
+      if (diff < needed) {
+        // Con los números: así se sabe qué midió (y se puede ajustar sin adivinar).
+        throw {
+          code: "calibration_eyes",
+          numbers: {
+            lo: n2(eyeOpenL), lc: n2(eyeClosedL), ld: n2(eyeClosedL - eyeOpenL),
+            ro: n2(eyeOpenR), rc: n2(eyeClosedR), rd: n2(eyeClosedR - eyeOpenR),
+            diff: n3(diff), needed: n3(needed), noise: n3(avgNoise),
+          },
+        } satisfies EyesError;
+      }
+      // Un ojo con muy poco cambio propio (frente a su temblor) usa el promedio de los dos.
+      const own = (open: number, closed: number, noise: number): [number, number] =>
+        closed - open >= Math.max(MIN_EYE_RANGE, NOISE_FACTOR * noise) ? [open, closed] : [avgOpen, avgClosed];
+      const [openL, closedL] = own(eyeOpenL, eyeClosedL, noiseL);
       const measured: Levels = {
-        // Abierto: un valor alto pero no el máximo (un pestañeo suelto no lo arruina).
-        eyeOpen: percentile(neutral.flatMap((f) => [f.blinkLeft, f.blinkRight]), 0.9),
-        eyeClosed: median(eyes.map((f) => (f.blinkLeft + f.blinkRight) / 2)),
+        eyeOpen: openL,
+        eyeClosed: closedL,
+        eyeRight: own(eyeOpenR, eyeClosedR, noiseR),
+        eyeNoise: [noiseL, noiseR],
         jawRest: percentile(neutral.map((f) => f.jawOpen), 0.9),
         jawMax: percentile(mouth.map((f) => f.jawOpen), 0.95),
       };
-      if (measured.eyeClosed - measured.eyeOpen < MIN_RANGE) throw "calibration_eyes";
       if (measured.jawMax - measured.jawRest < MIN_RANGE) throw "calibration_mouth";
 
       levels = measured;
       headOffset = [0, 1, 2].map((i) => median(neutral.map((f) => f.head[i]))) as [number, number, number];
       restPos = [0, 1, 2].map((i) => median(neutral.map((f) => f.headPos[i]))) as [number, number, number];
+      // Mirada al mirar la pantalla (la cámara suele estar más arriba): se resta después.
+      gazeOffset = [0, 1].map((i) => Math.max(-1, Math.min(1, median(neutral.map((f) => f.gaze?.[i] ?? 0))))) as [number, number];
       eyeSensitivity = 0;
       mouthSensitivity = 0;
       step = "adjust";
@@ -256,7 +381,8 @@
 
   {#if step === "adjust" && values}
     <p>{t("calibration.adjustHelp")}</p>
-    {@render meter(t("calibration.eyesMeter"), liveEye, values.eyeOpen, values.eyeClosed)}
+    {@render meter(t("calibration.eyeLeftMeter"), liveEyeL, values.eyeOpen, values.eyeClosed)}
+    {@render meter(t("calibration.eyeRightMeter"), liveEyeR, values.eyeRight?.[0] ?? values.eyeOpen, values.eyeRight?.[1] ?? values.eyeClosed)}
     {@render meter(t("calibration.mouthMeter"), liveJaw, values.mouthClosed, values.mouthOpen)}
     <p class="legend">{t("calibration.legend")}</p>
 
@@ -277,7 +403,8 @@
       </span>
     </label>
 
-    {#if error}<p class="error">{tError(error)}</p>{/if}
+    {#if smallEyeSignal}<p class="warn">{t("calibration.smallEyeSignal")}</p>{/if}
+    {#if error}<p class="error">{errorText(error)}</p>{/if}
     <div class="actions three">
       <button class="btn" onclick={save} disabled={saving}>{t("calibration.save")}</button>
       <button class="btn ghost" onclick={run} use:tooltip={t("tooltips.calibrationRepeat")}>{t("calibration.repeat")}</button>
@@ -286,20 +413,29 @@
   {:else}
     <p>{t(STEP_TEXT[step === "adjust" ? "intro" : step])}</p>
     {#if step === "eyes"}
-      {@render meter(t("calibration.eyesMeter"), liveEye, 0, 1)}
+      {@render meter(t("calibration.eyeLeftMeter"), liveEyeL, 0, 1)}
+      {@render meter(t("calibration.eyeRightMeter"), liveEyeR, 0, 1)}
     {:else if step === "mouth"}
       {@render meter(t("calibration.mouthMeter"), liveJaw, 0, 1)}
     {/if}
-    {#if step !== "intro"}
+    {#if step !== "intro" && !waiting}
       <p class="status">
         {capturing ? t("calibration.capturing") : t("calibration.countdown", { n: countdown })}
       </p>
     {/if}
-    {#if error}<p class="error">{tError(error)}</p>{/if}
+    {#if error}<p class="error">{errorText(error)}</p>{/if}
     {#if step === "intro"}
       <div class="actions">
         <button class="btn" onclick={run} disabled={!faceVisible} use:tooltip={t("tooltips.calibrationStart")}>
           {t("calibration.start")}
+        </button>
+        <button class="btn ghost" onclick={cancel}>{t("calibration.cancel")}</button>
+      </div>
+    {:else if waiting}
+      <!-- Sin ver la cara no se puede medir: el botón espera a que la cámara te vea. -->
+      <div class="actions">
+        <button class="btn" onclick={() => go?.()} disabled={!faceVisible}>
+          {t("calibration.startStep")}
         </button>
         <button class="btn ghost" onclick={cancel}>{t("calibration.cancel")}</button>
       </div>
@@ -347,4 +483,8 @@
   .btn.ghost { background: transparent; border-color: var(--border); color: var(--text); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .error { color: var(--danger); font-size: 12px; }
+  .warn {
+    margin: 6px 0; padding: 6px 8px; border: 1px solid #b45309; border-radius: 6px;
+    background: rgba(251, 191, 36, 0.12); color: #fcd34d; font-size: 11px; line-height: 1.4;
+  }
 </style>

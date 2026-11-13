@@ -102,6 +102,24 @@ impl TrackingRelay {
 /// Estado de Tauri con el canal de tracking.
 pub struct TrackingState(pub TrackingRelay);
 
+/// Deja un valor en 0–1 (lo que no es un número, en 0).
+fn unit(v: f32) -> f32 {
+    if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }
+}
+
+/// La interfaz envía aquí el nivel de voz del lip-sync (~30 por segundo).
+/// `level` se limita a 0–1; `mode`: `combine` (lo mayor entre cámara y voz) o `voice`;
+/// `vowels`: peso de A, I, U, E, O (5 valores 0–1) o `null` si el reconocimiento está apagado.
+#[tauri::command]
+pub fn lipsync_update(state: tauri::State<'_, TrackingState>, level: f32, mode: &str, vowels: Option<Vec<f32>>) {
+    let mode = if mode == "voice" { "voice" } else { "combine" };
+    let vowels: Option<Vec<f32>> = vowels.filter(|v| v.len() == 5).map(|v| v.into_iter().map(unit).collect());
+    let msg = serde_json::json!({
+        "type": "lipsync", "avatar": MAIN_AVATAR, "level": unit(level), "mode": mode, "vowels": vowels,
+    });
+    state.0.broadcast(&msg.to_string());
+}
+
 /// La interfaz envía aquí cada cuadro del seguimiento facial.
 #[tauri::command]
 pub fn tracking_update(state: tauri::State<'_, TrackingState>, frame: serde_json::Value) {

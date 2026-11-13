@@ -1,31 +1,36 @@
 // avat-os — Copyright (C) 2026 avat-os contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Expresiones del avatar (emociones VRM) activadas con atajos de teclado
-// globales (funcionan aunque avat-os no tenga el foco, p. ej. jugando) o con
-// los botones del panel. Pulsar el atajo de la expresión activa vuelve a neutral.
+// Expresiones del avatar (emociones VRM) y gestos animados. Se activan con los
+// botones del panel o con atajos de teclado globales (ver shortcuts.rs).
+// - Expresión: se queda activa; activarla otra vez vuelve a neutral.
+// - Gesto: una animación corta (saludar, asentir…) que termina sola.
 
 use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+use crate::shortcuts;
 use crate::tracking_relay::TrackingState;
 
 /// Avatar destino. Hoy hay uno solo; el diseño admite varios (modo dúo).
 pub const MAIN_AVATAR: &str = "main";
 
-/// Expresiones preestablecidas de VRM y su atajo (Ctrl+Shift+número).
-/// No se usa Ctrl+Alt: en teclados en español equivale a AltGr (AltGr+2 = @).
-const EXPRESSIONS: [(&str, Code, &str); 5] = [
-    ("happy", Code::Digit1, "Ctrl+Shift+1"),
-    ("angry", Code::Digit2, "Ctrl+Shift+2"),
-    ("sad", Code::Digit3, "Ctrl+Shift+3"),
-    ("surprised", Code::Digit4, "Ctrl+Shift+4"),
-    ("relaxed", Code::Digit5, "Ctrl+Shift+5"),
-];
-const MODS: Modifiers = Modifiers::CONTROL.union(Modifiers::SHIFT);
+/// Expresiones preestablecidas de VRM.
+const EXPRESSIONS: [&str; 5] = ["happy", "angry", "sad", "surprised", "relaxed"];
+/// Gestos animados.
+const GESTURES: [&str; 4] = ["wave", "nod", "shake", "shrug"];
+
+/// Reproduce un gesto en la página del avatar. No es "pegajoso": es momentáneo.
+pub fn play_gesture<R: Runtime>(app: &AppHandle<R>, name: &str) {
+    if !GESTURES.contains(&name) {
+        return;
+    }
+    let msg = serde_json::json!({ "type": "gesture", "avatar": MAIN_AVATAR, "name": name });
+    app.state::<TrackingState>().0.broadcast(&msg.to_string());
+    let _ = app.emit("gesture-played", name);
+}
 
 /// Expresión activa (`None` = neutral).
 #[derive(Default)]
@@ -34,7 +39,8 @@ pub struct ExpressionState(Mutex<Option<String>>);
 #[derive(Serialize)]
 pub struct ExpressionInfo {
     name: &'static str,
-    shortcut: &'static str,
+    /// Atajo actual para mostrar (`Ctrl+Shift+1`) o `null` si no tiene.
+    shortcut: Option<String>,
 }
 
 /// Activa una expresión (o neutral) y la envía a la página del avatar y a la interfaz.
@@ -53,9 +59,12 @@ fn notify<R: Runtime>(app: &AppHandle<R>, name: Option<String>) {
     let _ = app.emit("expression-changed", name);
 }
 
-/// Pulsar la expresión activa vuelve a neutral. Leer y cambiar se hace con el
+/// Activar la expresión activa vuelve a neutral. Leer y cambiar se hace con el
 /// mismo bloqueo para que un atajo y un botón simultáneos no se pisen.
-fn toggle<R: Runtime>(app: &AppHandle<R>, name: &str) {
+pub fn toggle<R: Runtime>(app: &AppHandle<R>, name: &str) {
+    if !EXPRESSIONS.contains(&name) {
+        return;
+    }
     let state = app.state::<ExpressionState>();
     let next = {
         let mut current = state.0.lock().unwrap();
@@ -66,37 +75,12 @@ fn toggle<R: Runtime>(app: &AppHandle<R>, name: &str) {
     notify(app, next);
 }
 
-/// Plugin de atajos globales con el manejador de expresiones.
-pub fn shortcuts_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    tauri_plugin_global_shortcut::Builder::new()
-        .with_handler(|app, shortcut, event| {
-            if event.state() != ShortcutState::Pressed {
-                return;
-            }
-            if let Some((name, _, _)) =
-                EXPRESSIONS.iter().find(|(_, code, _)| *shortcut == Shortcut::new(Some(MODS), *code))
-            {
-                toggle(app, name);
-            }
-        })
-        .build()
-}
-
-/// Registra los atajos. Si otro programa ya usa alguno, se avisa en el log y se sigue.
-pub fn register_shortcuts<R: Runtime>(app: &AppHandle<R>) {
-    for (name, code, label) in EXPRESSIONS {
-        if let Err(e) = app.global_shortcut().register(Shortcut::new(Some(MODS), code)) {
-            log::warn!("No se pudo registrar el atajo {label} ({name}): {e}");
-        }
-    }
-}
-
 /// Lista de expresiones con su atajo, para los botones del panel.
 #[tauri::command]
-pub fn expression_list() -> Vec<ExpressionInfo> {
+pub fn expression_list(app: AppHandle) -> Vec<ExpressionInfo> {
     EXPRESSIONS
         .iter()
-        .map(|(name, _, shortcut)| ExpressionInfo { name, shortcut })
+        .map(|name| ExpressionInfo { name, shortcut: shortcuts::label_for(&app, &format!("expression.{name}")) })
         .collect()
 }
 
@@ -111,9 +95,29 @@ pub fn expression_current(state: tauri::State<'_, ExpressionState>) -> Option<St
 pub fn expression_set(app: AppHandle, name: Option<String>) -> Result<(), String> {
     match name {
         None => apply(&app, None),
-        Some(n) if EXPRESSIONS.iter().any(|(e, _, _)| *e == n) => toggle(&app, &n),
+        Some(n) if EXPRESSIONS.contains(&n.as_str()) => toggle(&app, &n),
         // Código de error: la interfaz lo traduce (errors.expression_unknown).
         Some(n) => return Err(format!("expression_unknown: {n}")),
     }
+    Ok(())
+}
+
+/// Lista de gestos con su atajo, para los botones del panel.
+#[tauri::command]
+pub fn gesture_list(app: AppHandle) -> Vec<ExpressionInfo> {
+    GESTURES
+        .iter()
+        .map(|name| ExpressionInfo { name, shortcut: shortcuts::label_for(&app, &format!("gesture.{name}")) })
+        .collect()
+}
+
+/// Reproduce un gesto desde la interfaz.
+#[tauri::command]
+pub fn gesture_play(app: AppHandle, name: String) -> Result<(), String> {
+    if !GESTURES.contains(&name.as_str()) {
+        // Código de error: la interfaz lo traduce (errors.gesture_unknown).
+        return Err(format!("gesture_unknown: {name}"));
+    }
+    play_gesture(&app, &name);
     Ok(())
 }

@@ -43,10 +43,12 @@ tauri-plugin-dialog = "2"
 tiny_http = "0.12"
 tungstenite = "0.30"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
 
 [target.'cfg(windows)'.dependencies]
-# Ícono grande de la ventana (barra de tareas), ver src/win_icon.rs.
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
+# Ícono grande de la ventana (barra de tareas), ver src/win_icon.rs; nombre de las teclas de
+# símbolos según el teclado de la persona, ver src/shortcuts.rs.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

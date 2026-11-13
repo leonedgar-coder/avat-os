@@ -12,7 +12,10 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
     "build:avatar": "vite build --config avatar/vite.config.js",
-    "fetch:tracking": "node scripts/fetch-tracking.mjs"
+    "fetch:tracking": "node scripts/fetch-tracking.mjs",
+    "test:vowels": "node scripts/test-vowels.ts",
+    "test:smoothing": "node scripts/test-smoothing.ts",
+    "test:blink": "node scripts/test-blink.ts"
   },
   "license": "GPL-3.0-or-later",
   "dependencies": {

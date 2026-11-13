@@ -23,10 +23,15 @@ const FILE_NAME: &str = "calibracion.json";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Calibration {
-    /// Valor de MediaPipe por debajo del cual el ojo queda abierto (0–1).
+    /// Valor de MediaPipe por debajo del cual el ojo queda abierto (0–1). Con `eye_right`,
+    /// es el del ojo izquierdo (`blinkLeft`); sin él, el de los dos.
     pub eye_open: f32,
-    /// Valor desde el cual el ojo queda cerrado del todo (0–1).
+    /// Valor desde el cual el ojo queda cerrado del todo (0–1). Igual que `eye_open`.
     pub eye_closed: f32,
+    /// Umbrales propios del ojo derecho (`blinkRight`) [abierto, cerrado]: la cámara suele
+    /// ver un ojo más cerrado que el otro. `None` en calibraciones antiguas (= los mismos).
+    #[serde(default)]
+    pub eye_right: Option<[f32; 2]>,
     /// Valor de `jawOpen` por debajo del cual la boca queda cerrada (0–1).
     pub mouth_closed: f32,
     /// Valor de `jawOpen` desde el cual la boca queda abierta del todo (0–1).
@@ -35,6 +40,10 @@ pub struct Calibration {
     pub head_offset: [f32; 3],
     /// Posición de la cabeza en reposo [x, y, z] (cm).
     pub rest_pos: [f32; 3],
+    /// Mirada [horizontal, vertical] al mirar la pantalla de frente (la cámara suele
+    /// estar más arriba que la pantalla). `[0, 0]` en calibraciones antiguas.
+    #[serde(default)]
+    pub gaze_offset: [f32; 2],
     /// Medidas originales del asistente, para recalcular los umbrales al cambiar la
     /// sensibilidad sin repetir los pasos. `None` en calibraciones antiguas.
     #[serde(default)]
@@ -54,18 +63,31 @@ pub struct Levels {
     pub eye_closed: f32,
     pub jaw_rest: f32,
     pub jaw_max: f32,
+    /// Medidas del ojo derecho [abierto, cerrado]; con ellas, `eye_open` / `eye_closed` son
+    /// las del izquierdo. `None` en calibraciones antiguas.
+    #[serde(default)]
+    pub eye_right: Option<[f32; 2]>,
+    /// Cuánto tiembla el valor de cada ojo abierto [izq., der.] (desvío robusto del paso 1):
+    /// los umbrales quedan por encima de ese temblor. `None` en calibraciones antiguas.
+    #[serde(default)]
+    pub eye_noise: Option<[f32; 2]>,
 }
 
 impl Calibration {
     fn is_valid(&self) -> bool {
         let unit = |v: f32| (0.0..=1.0).contains(&v);
         let sens = |v: f32| (-1.0..=1.0).contains(&v);
-        let finite = self.head_offset.iter().chain(&self.rest_pos).all(|v| v.is_finite());
+        let finite = self.head_offset.iter().chain(&self.rest_pos).all(|v| v.is_finite())
+            && self.gaze_offset.iter().all(|v| v.is_finite() && (-1.0..=1.0).contains(v));
         let levels_ok = self.levels.as_ref().is_none_or(|l| {
             [l.eye_open, l.eye_closed, l.jaw_rest, l.jaw_max].into_iter().all(unit)
+                && l.eye_right.is_none_or(|[o, c]| unit(o) && unit(c))
+                && l.eye_noise.is_none_or(|[a, b]| unit(a) && unit(b))
         });
+        let right_ok = self.eye_right.is_none_or(|[o, c]| unit(o) && unit(c) && o < c);
         unit(self.eye_open)
             && unit(self.eye_closed)
+            && right_ok
             && unit(self.mouth_closed)
             && unit(self.mouth_open)
             && self.eye_open < self.eye_closed
@@ -184,6 +206,36 @@ mod tests {
         assert!(cal.is_valid());
         assert!(cal.levels.is_none());
         assert_eq!(cal.eye_sensitivity, 0.0);
+        assert_eq!(cal.gaze_offset, [0.0, 0.0]);
+        assert!(cal.eye_right.is_none());
+    }
+
+    /// Lo que envía el asistente nuevo al pulsar Guardar (umbrales y medidas por ojo).
+    #[test]
+    fn acepta_lo_que_envia_el_asistente() {
+        let json = r#"{"eyeOpen":0.209,"eyeClosed":0.281,"eyeRight":[0.202,0.223],"mouthClosed":0.04,"mouthOpen":0.16,
+            "headOffset":[0.1,0.03,0.002],"restPos":[1.2,-3.5,-40.8],"gazeOffset":[0.01,-0.2],
+            "levels":{"eyeOpen":0.176,"eyeClosed":0.3,"jawRest":0.0195,"jawMax":0.42,"eyeRight":[0.18,0.23],"eyeNoise":[0.004,0.005]},
+            "eyeSensitivity":0.3,"mouthSensitivity":1}"#;
+        let cal: Calibration = serde_json::from_str(json).expect("formato del asistente");
+        assert!(cal.is_valid());
+        // El ruido se guarda y se vuelve a leer (lo usan los deslizadores de "Prueba y ajuste").
+        let again: Calibration = serde_json::from_str(&serde_json::to_string(&cal).unwrap()).unwrap();
+        assert_eq!(again.levels.unwrap().eye_noise, Some([0.004, 0.005]));
+    }
+
+    #[test]
+    fn umbrales_por_ojo() {
+        let mut cal: Calibration = serde_json::from_str(OLD_FILE).unwrap();
+        cal.eye_right = Some([0.3, 0.7]);
+        assert!(cal.is_valid());
+        // Se guarda y se vuelve a leer con el nombre que usa la interfaz.
+        let json = serde_json::to_string(&cal).unwrap();
+        assert!(json.contains("\"eyeRight\":[0.3,0.7]"));
+        cal.eye_right = Some([0.7, 0.3]); // abierto por encima de cerrado
+        assert!(!cal.is_valid());
+        cal.eye_right = Some([0.2, 1.4]);
+        assert!(!cal.is_valid());
     }
 
     #[test]
@@ -195,7 +247,7 @@ mod tests {
         cal.eye_open = 0.6; // abierto por encima de cerrado
         assert!(!cal.is_valid());
         cal.eye_open = 0.2;
-        cal.levels = Some(Levels { eye_open: 0.1, eye_closed: 2.0, jaw_rest: 0.0, jaw_max: 0.5 });
+        cal.levels = Some(Levels { eye_open: 0.1, eye_closed: 2.0, jaw_rest: 0.0, jaw_max: 0.5, eye_right: None, eye_noise: None });
         assert!(!cal.is_valid());
     }
 }
