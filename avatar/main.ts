@@ -8,9 +8,10 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { VRMLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
-import { OneEuroVector, SoftDeadband } from "./one-euro";
+import { OneEuroFilter, OneEuroVector, SoftDeadband } from "./one-euro";
+import { BodyEstimator } from "./body";
 import { SpikeFilter, WinkGate } from "./spike-filter";
-import { FRAME_INTERPOLATION, GAZE_FILTER, HEAD_DEADBAND, HEAD_FILTER, POSITION_DEADBAND, POSITION_FILTER } from "./smoothing";
+import { FRAME_INTERPOLATION, GAZE_FILTER, HEAD_DEADBAND, HEAD_FILTER, POSITION_DEADBAND, POSITION_FILTER, SHOULDER_FILTER } from "./smoothing";
 
 const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
 renderer.setClearColor(0x000000, 0);
@@ -163,11 +164,16 @@ interface TrackingFrame {
   jawOpen: number;
   mouthFunnel: number;
   smile: number;
+  /** Ancho de los hombros (altos de imagen, corregido por el giro), o null si no se ven. */
+  shoulders?: number | null;
   /** Cuándo se midió (segundos, reloj de la interfaz; opcional por compatibilidad). */
   time?: number;
   /** Calculados en filterFrame: cuánto está cerrado cada ojo (0–1). */
   closedLeft?: number;
   closedRight?: number;
+  /** Calculados en filterFrame (avatar/body.ts): distancia del cuerpo e inclinación (cm). */
+  bodyDistance?: number;
+  lean?: number;
 }
 
 /** Mensajes del canal en vivo (ver tracking_relay.rs). */
@@ -195,6 +201,8 @@ interface Calibration {
   gazeOffset?: [number, number];
   /** Lo que midió el asistente (abierto y cerrado de cada ojo), para el margen mínimo. */
   levels?: { eyeOpen: number; eyeClosed: number; eyeRight?: [number, number] | null } | null;
+  /** Distancia de la cara × ancho de los hombros, de frente (paso 1). Ver avatar/body.ts. */
+  bodyRatio?: number | null;
 }
 
 /** Identificador de este avatar (`?id=` en la URL; hoy siempre "main"). */
@@ -514,6 +522,9 @@ const positionDeadband = new SoftDeadband(POSITION_DEADBAND);
 const blinkLeftFilter = new SpikeFilter();
 const blinkRightFilter = new SpikeFilter();
 const winkGate = new WinkGate();
+const shoulderFilter = new OneEuroFilter(SHOULDER_FILTER);
+const bodyEstimator = new BodyEstimator();
+const bodyDeadband = new SoftDeadband(POSITION_DEADBAND);
 
 /** Última marca de tiempo usada por los filtros. */
 let lastSampleTime = -Infinity;
@@ -534,6 +545,9 @@ function filterFrame(frame: TrackingFrame, now: number): TrackingFrame {
     blinkLeftFilter.reset();
     blinkRightFilter.reset();
     winkGate.reset();
+    shoulderFilter.reset();
+    bodyEstimator.reset();
+    bodyDeadband.reset();
   }
   lastSampleTime = time;
   const blinkLeft = blinkLeftFilter.filter(frame.blinkLeft);
@@ -543,6 +557,18 @@ function filterFrame(frame: TrackingFrame, now: number): TrackingFrame {
   // Cuánto está cerrado cada ojo; cerrar uno solo tiene que sostenerse (WinkGate).
   const [closedLeft, closedRight] = winkGate.filter(eyeClosed(blinkLeft, "left"), eyeClosed(blinkRight, "right"));
   const eyesClosed = Math.max(closedLeft, closedRight) >= 0.5;
+  const headPos = frame.headPos && (positionDeadband.filter(positionFilter.filter(frame.headPos, time)) as TrackingFrame["head"]);
+  // Inclinarse o acercarse (avatar/body.ts). Si los hombros desaparecen, su filtro empieza de
+  // cero al volver (no mezclar una medida vieja con la nueva).
+  const rawShoulders = typeof frame.shoulders === "number" && frame.shoulders > 0 ? frame.shoulders : null;
+  if (rawShoulders === null) shoulderFilter.reset();
+  const shoulders = rawShoulders === null ? null : shoulderFilter.filter(rawShoulders, time);
+  let body: { bodyDistance?: number; lean?: number } = {};
+  if (headPos) {
+    const b = bodyEstimator.update(Math.max(15, -headPos[2]), shoulders, time);
+    const [bodyDistance, lean] = bodyDeadband.filter([b.bodyDistance, b.lean]);
+    body = { bodyDistance, lean };
+  }
   return {
     ...frame,
     blinkLeft,
@@ -550,7 +576,9 @@ function filterFrame(frame: TrackingFrame, now: number): TrackingFrame {
     closedLeft,
     closedRight,
     head: headDeadband.filter(headFilter.filter(frame.head, time)) as TrackingFrame["head"],
-    headPos: frame.headPos && (positionDeadband.filter(positionFilter.filter(frame.headPos, time)) as TrackingFrame["head"]),
+    headPos,
+    shoulders,
+    ...body,
     gaze: frame.gaze && !eyesClosed ? (gazeFilter.filter(frame.gaze, time) as [number, number]) : undefined,
   };
 }
@@ -584,6 +612,7 @@ function connectTracking() {
       activeExpression = msg.name;
     } else if (msg.type === "calibration") {
       calibration = msg.values;
+      bodyEstimator.setCalibration(calibration?.bodyRatio ?? null);
     }
   };
   ws.onclose = () => setTimeout(connectTracking, 1000); // reconectar
@@ -628,8 +657,18 @@ function mouthOpen(jaw: number): number {
   return remap(jaw, calibration?.mouthClosed ?? MOUTH_CLOSED, calibration?.mouthOpen ?? MOUTH_OPEN);
 }
 
-/** Posición de reposo de la cabeza (cm) para calcular la inclinación del cuerpo. */
-let restPos: { x: number; z: number } | null = null;
+/**
+ * Reposo para calcular el cuerpo: posición lateral de la cabeza (cm) y distancia del cuerpo
+ * a la cámara (cm, positiva).
+ */
+let restPos: { x: number; distance: number } | null = null;
+/** Distancia (cm) desde la cadera hasta la cabeza, para pasar la inclinación de cm a ángulo. */
+const TORSO_LENGTH_CM = 50;
+/** Inclinación máxima del cuerpo (rad): hacia adelante ~35°, hacia atrás poco. */
+const LEAN_FWD_MAX = 0.6;
+const LEAN_BACK_MAX = 0.15;
+/** Cómo se reparte la inclinación hacia adelante: columna, pecho y cuello. */
+const LEAN_SHARE = { spine: 0.5, chest: 0.2, neck: 0.3 } as const;
 
 /** Aplica el tracking con suavizado exponencial. Devuelve false si no hay datos recientes. */
 function applyTracking(model: VRM, delta: number, t: number): boolean {
@@ -662,26 +701,29 @@ function applyTracking(model: VRM, delta: number, t: number): boolean {
   }
   applyGaze(model);
 
-  // Cuerpo que acompaña: inclinación según cuánto se movió la cabeza desde su
-  // posición de reposo. Con calibración, el reposo es fijo; sin ella, se recalcula
-  // despacio (~8 s) a partir de la postura actual.
+  // Cuerpo que acompaña. Con calibración, el reposo es fijo; sin ella, se recalcula despacio
+  // (~8 s) a partir de la postura actual.
   const [px, , pz] = target.headPos ?? [0, 0, 0];
+  // Distancia del cuerpo e inclinación hacia el frente (avatar/body.ts): con los hombros a la
+  // vista se distinguen; sin ellos, una inclinación mantenida pasa a ser acercamiento.
+  const bodyDistance = target.bodyDistance ?? Math.max(15, -pz);
+  const lean = target.lean ?? 0;
   if (calibration) {
-    restPos = { x: calibration.restPos[0], z: calibration.restPos[2] };
+    restPos = { x: calibration.restPos[0], distance: Math.max(15, -calibration.restPos[2]) };
   } else {
-    if (!restPos) restPos = { x: px, z: pz };
+    if (!restPos) restPos = { x: px, distance: bodyDistance };
     const kRest = 1 - Math.exp(-delta / 8);
     restPos.x = lerp(restPos.x, px, kRest);
-    restPos.z = lerp(restPos.z, pz, kRest);
+    restPos.distance = lerp(restPos.distance, bodyDistance, kRest);
   }
   const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
   smooth.leanSide = lerp(smooth.leanSide, clamp(-(px - restPos.x) * 0.012, 0.25)); // cm → rad
-  smooth.leanFwd = lerp(smooth.leanFwd, clamp((pz - restPos.z) * 0.01, 0.2));
-  // Acercarse / alejarse de la cámara: el avatar se acerca o se aleja de la suya en la misma
-  // proporción (25 % más cerca de tu cámara → 25 % más cerca de la del avatar: se ve igual de
-  // más grande). La inclinación de arriba casi no se ve de frente; esto sí.
-  const restDistance = Math.max(15, Math.abs(restPos.z)); // cm (z es negativo: delante de la cámara)
-  const closer = (pz - restPos.z) / restDistance; // fracción: + = más cerca
+  // Inclinación hacia el frente: la cara está `lean` cm por delante del cuerpo → ángulo.
+  smooth.leanFwd = lerp(smooth.leanFwd, Math.max(-LEAN_BACK_MAX, Math.min(LEAN_FWD_MAX, Math.atan2(lean, TORSO_LENGTH_CM))));
+  // Acercarse / alejarse de la cámara (el cuerpo, no la cara): el avatar se acerca o se aleja
+  // de la suya en la misma proporción (25 % más cerca de tu cámara → 25 % más cerca de la del
+  // avatar: se ve igual de más grande).
+  const closer = (restPos.distance - bodyDistance) / restPos.distance; // fracción: + = más cerca
   smooth.approach = lerp(
     smooth.approach,
     Math.min(APPROACH_MAX_IN, Math.max(-APPROACH_MAX_OUT, closer)) * cameraDistance,
@@ -695,10 +737,10 @@ function applyTracking(model: VRM, delta: number, t: number): boolean {
     if (!b) continue;
     let x = smooth.pitch * share;
     let z = smooth.roll * share;
-    if (name === "spine") {
-      x += smooth.leanFwd;
-      z += smooth.leanSide;
-    }
+    // La inclinación se reparte de la cadera al cuello; la cabeza la descuenta para quedar
+    // orientada como la tuya (MediaPipe ya da su giro total, con la inclinación incluida).
+    x += name === "head" ? -smooth.leanFwd : smooth.leanFwd * LEAN_SHARE[name];
+    if (name === "spine") z += smooth.leanSide;
     if (name === "chest") x += breath;
     b.rotation.set(x, smooth.yaw * share, z, "YXZ");
   }

@@ -35,7 +35,7 @@ avat-os es un estudio para VTubers: en un solo programa tienes **tu avatar 3D qu
 | Memoria | 8 GB de RAM | 16 GB de RAM |
 | Cámara | Cualquier webcam (para el tracking facial) | Webcam 720p o superior, buena luz de frente |
 
-En un portátil con Intel Iris Xe, avat-os usa aproximadamente **8 % de CPU** y el tracking facial funciona a **45–56 FPS**.
+En un portátil con Intel Iris Xe, avat-os usa aproximadamente **8 % de CPU** y el tracking facial funciona a **45–56 FPS** (unos **40 FPS** con el detector de hombros).
 
 > Por ahora avat-os todavía no tiene instalador: se ejecuta en modo desarrollo. Los pasos están en la
 > [Guía del programador](GUIA-DEL-PROGRAMADOR.md#3-preparar-el-entorno). El instalador llegará en la Fase 6.
@@ -167,12 +167,27 @@ Si a tu avatar le falta alguna, esa parte simplemente no se moverá.
 |---|---|
 | Girar, inclinar o asentir con la cabeza | Gira la cabeza; el cuello, el pecho y la columna acompañan el giro |
 | Inclinarte hacia un lado | Inclina el torso |
-| Acercarte o alejarte de la cámara | Se acerca o se aleja de su cámara en la misma proporción (se ve más grande o más chico) y se inclina un poco; su cara queda en el mismo lugar de la pantalla. Hasta un 30 % más cerca y un 50 % más lejos. Sin calibrar, a los pocos segundos toma la nueva distancia como la normal; con calibración, la distancia normal es la del paso 1 |
+| Inclinarte hacia el frente (o hacia atrás) | Inclina la columna, el pecho y el cuello; la cabeza sigue mirando como la tuya. **No** se acerca a la cámara (ver *Hombros* más abajo) |
+| Acercarte o alejarte de la cámara (mover la silla, dar un paso) | Se acerca o se aleja de su cámara en la misma proporción (se ve más grande o más chico); su cara queda en el mismo lugar de la pantalla. Hasta un 30 % más cerca y un 50 % más lejos. Sin calibrar, a los pocos segundos toma la nueva distancia como la normal; con calibración, la distancia normal es la del paso 1 |
 | Parpadear o guiñar un ojo | Cierra el ojo correspondiente (como un espejo) |
 | Mirar hacia un lado, arriba o abajo | Mueve los ojos hacia el mismo lado (cada avatar decide cuánto pueden girar sus ojos) |
 | Abrir la boca / hablar | Abre la boca |
 | Poner la boca en "o" | Boca redonda |
 | Dejar de estar frente a la cámara | Después de medio segundo vuelve a la animación de reposo (respiración y parpadeo automático) |
+
+### Hombros: inclinarte o acercarte
+
+Con solo la cara, inclinarte hacia el frente y acercarte a la cámara se ven igual (la cara se
+acerca). Por eso avat-os también mira tus **hombros**: al acercarte se ven más anchos; al
+inclinarte, casi no cambian. Debajo de *Cara detectada* el panel dice:
+
+- **Hombros visibles:** inclinarte inclina el avatar y acercarte lo acerca.
+- **Hombros: no se ven** (fuera del cuadro, tapados o con poca luz): una inclinación corta se ve
+  como inclinación, pero si te quedas inclinado unos segundos el avatar pasa a acercarse.
+
+Consejos: que la cámara vea tus dos hombros enteros (no cortados por el borde) y **recalibra**
+con los hombros a la vista: el paso 1 mide tu proporción cara–hombros (sin calibrar, avat-os la
+aprende sola en unos segundos). Girar el torso no confunde la medida.
 
 El avatar **siempre respira**, también con el tracking encendido. La sonrisa **no** activa la cara de "alegre": las emociones se activan con los atajos de teclado ([sección 7](#7-expresiones-gestos-y-atajos-de-teclado)).
 
@@ -181,7 +196,7 @@ El avatar **siempre respira**, también con el tracking encendido. La sonrisa **
 | Texto | Significado |
 |---|---|
 | **Cara detectada** / **Buscando cara…** | Si la cámara te está viendo |
-| **46 FPS** | Cuántas veces por segundo se analiza tu cara. Más de 25 es suficiente |
+| **46 FPS** | Cuántas veces por segundo se analiza tu cara. Más de 25 es suficiente. Con poca luz muchas webcams bajan solas a 10–15 cuadros por segundo: si ves pocos FPS, pon más luz de frente |
 | **Boca 0.12** | Cuánto abres la boca según la cámara (0 = cerrada, 1 = muy abierta) |
 | **Ojo izq. 0.05 · der. 0.04** | Cuánto cierras cada ojo según la cámara (0 = abierto, 1 = cerrado) |
 
@@ -392,7 +407,10 @@ El **anti-temblor** de la cabeza, la posición y la mirada está en `avatar/smoo
 | `FRAME_INTERPOLATION` (en `smoothing.ts`) | `45` | Une las muestras del tracking (30 por segundo) entre cuadros; no conviene bajarlo |
 | `delta * 45` | `45` | Velocidad de ojos y boca (tienen que ser rápidos: un parpadeo dura ~150 ms) |
 | `* 0.012` y `0.25` | `0.012` / `0.25` | Cuánto se inclina el torso hacia los lados al moverte, y el máximo permitido |
-| `* 0.01` y `0.2` | `0.01` / `0.2` | Cuánto se inclina el torso hacia adelante al acercarte, y el máximo |
+| `TORSO_LENGTH_CM` | `50` | Distancia de la cadera a la cabeza: con ella, los cm que adelantas la cara se pasan a un ángulo. **Más bajo** = el avatar se inclina más |
+| `LEAN_FWD_MAX` / `LEAN_BACK_MAX` | `0.6` / `0.15` rad | Cuánto puede inclinarse el avatar hacia adelante (~35°) y hacia atrás |
+| `LEAN_SHARE` | columna 0,5 · pecho 0,2 · cuello 0,3 | Cómo se reparte la inclinación hacia el frente |
+| `FACE_ONLY_SETTLE_S` (en `body.ts`) | `3` s | Sin hombros a la vista: en cuánto tiempo una inclinación mantenida pasa a ser acercamiento |
 | `APPROACH_MAX_IN` / `APPROACH_MAX_OUT` | `0.3` / `0.5` | Cuánto puede acercarse (30 %) y alejarse (50 %) el avatar de su cámara cuando tú te acercas o te alejas de la tuya |
 | `["spine", 0.15], ["chest", 0.15], ["neck", 0.3], ["head", 0.4]` | 15 % · 15 % · 30 % · 40 % | Cómo se reparte el giro de la cabeza entre columna, pecho, cuello y cabeza (deben sumar 1) |
 | `delta / 8` | `8` segundos | Cada cuánto el programa vuelve a tomar tu postura como "normal" |

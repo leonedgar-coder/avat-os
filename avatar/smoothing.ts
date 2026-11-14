@@ -14,6 +14,11 @@ export const POSITION_FILTER: OneEuroParams = { minCutoff: 0.5, beta: 0.1 };
 /** Mirada (−1 a 1): los ojos saltan rápido de un punto a otro, así que filtra menos en movimiento. */
 export const GAZE_FILTER: OneEuroParams = { minCutoff: 1, beta: 4 };
 /**
+ * Ancho de los hombros (en altos de imagen, ~0,3): Pose tiembla más que la cara. Quieto,
+ * muy suave; al acercarte (~0,1 por segundo) el filtro se abre y no se queda atrás.
+ */
+export const SHOULDER_FILTER: OneEuroParams = { minCutoff: 0.4, beta: 20 };
+/**
  * Interpolación por cuadro (1/s): el tracking llega ~30 veces por segundo y se dibuja a
  * ~60; esto solo une las muestras ya filtradas para que el movimiento no vaya a saltos.
  */

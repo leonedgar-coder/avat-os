@@ -15,7 +15,8 @@
     "fetch:tracking": "node scripts/fetch-tracking.mjs",
     "test:vowels": "node scripts/test-vowels.ts",
     "test:smoothing": "node scripts/test-smoothing.ts",
-    "test:blink": "node scripts/test-blink.ts"
+    "test:blink": "node scripts/test-blink.ts",
+    "test:body": "node scripts/test-body.ts"
   },
   "license": "GPL-3.0-or-later",
   "dependencies": {

@@ -84,6 +84,7 @@
   let trackingBusy = $state(false);
   let trackingFps = $state(0);
   let faceFound = $state(false);
+  let shouldersFound = $state(false);
   let trackingError = $state<unknown>(null);
   let lastFrame = $state<TrackingFrame | null>(null);
   // Otros interesados en cada cuadro (el asistente de calibración).
@@ -100,6 +101,7 @@
     (stats) => {
       trackingFps = stats.fps;
       faceFound = stats.faceFound;
+      shouldersFound = stats.shouldersFound;
       lastFrame = stats.last;
     },
   );
@@ -568,6 +570,14 @@
             <button type="button" class="info" aria-label={t("app.moreInfo")} use:tooltip={t("tooltips.fps")}>ⓘ</button>
           </span>
         </div>
+        {#if faceFound}
+          <div class="field sub">
+            <span>
+              {shouldersFound ? t("tracking.shouldersFound") : t("tracking.shouldersMissing")}
+              <button type="button" class="info" aria-label={t("app.moreInfo")} use:tooltip={t("tooltips.shoulders")}>ⓘ</button>
+            </span>
+          </div>
+        {/if}
         {#if lastFrame}
           <!-- Valores reales de MediaPipe (0 a 1), para calibrar -->
           <div class="field sub">

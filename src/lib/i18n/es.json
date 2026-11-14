@@ -28,6 +28,8 @@
     "on": "encendido",
     "off": "apagado",
     "faceFound": "Cara detectada",
+    "shouldersFound": "Hombros visibles",
+    "shouldersMissing": "Hombros: no se ven",
     "searching": "Buscando cara…",
     "fps": "{fps} FPS",
     "mouth": "Boca {value}",
@@ -138,6 +140,7 @@
   "tooltips": {
     "loadAvatar": "Avatares 3D en formato VRM (versión 0.x o 1.0). Guárdalos en la carpeta recursos\\avatares. ¿No tienes uno? Créalo gratis con VRoid Studio.",
     "tracking": "Usa tu webcam para que el avatar copie tu cabeza, tus ojos y tu boca. Todo se procesa en tu equipo: el video nunca sale de tu computadora.",
+    "shoulders": "Con los hombros a la vista, avat-os distingue inclinarte hacia el frente (se inclina el avatar) de acercarte a la cámara (el avatar se acerca). Si no se ven, una inclinación que mantienes unos segundos pasa a ser acercamiento. Deja que la cámara vea tus hombros enteros.",
     "fps": "Cuántas veces por segundo se analiza tu cara. Con más de 25 se ve fluido; si baja, mejora la luz frente a ti.",
     "values": "Lo que mide la cámara, de 0 a 1. Boca: 0 = cerrada, 1 = muy abierta. Ojos: 0 = abierto, 1 = cerrado. Sirve para ajustar el parpadeo y la boca (guía de usuario, apartado «Calibración y ajustes»).",
     "lipsync": "Mueve la boca del avatar con tu voz, usando el micrófono. Funciona también sin cámara. El audio se analiza en tu equipo y nunca se envía a ningún lado.",

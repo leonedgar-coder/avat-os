@@ -131,17 +131,19 @@ Antes de construir encima, comprobar que las piezas difíciles funcionan juntas.
 - [ ] ~~Revisar los valores por defecto de la calibración con más personas~~ → **movido a la Fase 6** (hacen falta otras personas que lo prueben)
 - [x] Ordenar el panel lateral: plegables **Avatares recientes**, **Ajustes del lip-sync** (la barra de voz queda a la vista), **Expresiones y gestos**, **Atajos de teclado** y **Efectos**; recuerdan si quedaron abiertos → [src/lib/rememberOpen.ts](src/lib/rememberOpen.ts). La calibración no: es una fila corta y el asistente es un paso a paso que no conviene esconder
 
-## Fase 1B — Cuerpo base (hombros)
+## Fase 1B — Cuerpo base (hombros) ✅ (2026-11-13)
 
 Separar **inclinarse hacia el frente** (solo cabeza y cuello) de **acercarse a la cámara** (el
 avatar se acerca). Con solo la cara no se distinguen: los hombros sí (al inclinarte, la cabeza
 se adelanta y los hombros casi no; al acercarte, se agrandan los dos).
 
-- [ ] MediaPipe Pose (modelo *lite*) en la misma cámara: hombros y su ancho
-- [ ] Inclinarse → cuello y cabeza; acercarse → el avatar se acerca (como ahora)
-- [ ] Plan B cuando no se ven los hombros: distinguir por la velocidad del movimiento
-- [ ] Medir el costo (CPU/FPS) y que el tracking facial no pierda fluidez
-- [ ] Pruebas en [pruebas.md](pruebas.md)
+- [x] MediaPipe Pose (modelo *lite*, ~15/s) en la misma cámara: ancho de los hombros corregido por el giro del torso → [src/lib/shoulders.ts](src/lib/shoulders.ts), [src/lib/tracking.ts](src/lib/tracking.ts); modelo en `npm run fetch:tracking`
+- [x] Proporción cara × hombros (calibración, paso 1, o aprendida): inclinarse → columna, pecho y cuello; acercarse → el avatar se acerca → [avatar/body.ts](avatar/body.ts)
+- [x] Plan B cuando no se ven los hombros: una inclinación mantenida pasa a acercamiento en ~3 s; sin saltos al cambiar
+- [x] Panel: *Hombros visibles* / *no se ven*, con ayuda
+- [x] Prueba automática `npm run test:body` (simulación) y `cargo test` de `bodyRatio`
+- [x] Medir el costo en la app real: ~40 FPS con hombros visibles (Iris Xe; con poca luz la webcam baja sola a ~11, sin culpa del detector)
+- [x] Probado con el usuario → ✅ [pruebas.md](pruebas.md). Girar el torso: el avatar no se aleja (correcto); que el avatar **gire** el torso es de la Fase 5
 
 ## Fase 2 — Escenas y fuentes
 

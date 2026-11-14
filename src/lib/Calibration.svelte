@@ -39,6 +39,8 @@
     levels?: Levels | null;
     eyeSensitivity?: number;
     mouthSensitivity?: number;
+    /** Distancia de la cara × ancho de los hombros, de frente (avatar/body.ts); null si no se vieron. */
+    bodyRatio?: number | null;
   }
 </script>
 
@@ -127,6 +129,7 @@
   let headOffset = $state<[number, number, number]>(opened?.headOffset ?? [0, 0, 0]);
   let restPos = $state<[number, number, number]>(opened?.restPos ?? [0, 0, -50]);
   let gazeOffset = $state<[number, number]>(opened?.gazeOffset ?? [0, 0]);
+  let bodyRatio = $state<number | null>(opened?.bodyRatio ?? null);
   let eyeSensitivity = $state(opened?.eyeSensitivity ?? 0);
 
   let mouthSensitivity = $state(opened?.mouthSensitivity ?? 0);
@@ -188,6 +191,7 @@
       headOffset,
       restPos,
       gazeOffset,
+      bodyRatio,
       levels,
       eyeSensitivity,
       mouthSensitivity,
@@ -329,6 +333,12 @@
       restPos = [0, 1, 2].map((i) => median(neutral.map((f) => f.headPos[i]))) as [number, number, number];
       // Mirada al mirar la pantalla (la cámara suele estar más arriba): se resta después.
       gazeOffset = [0, 1].map((i) => Math.max(-1, Math.min(1, median(neutral.map((f) => f.gaze?.[i] ?? 0))))) as [number, number];
+      // Proporción cara–hombros de frente (para distinguir inclinarse de acercarse). Solo si
+      // los hombros se vieron en la mayor parte del paso; si no, el avatar la aprende sola.
+      const withShoulders = neutral.filter((f) => typeof f.shoulders === "number" && f.shoulders > 0);
+      bodyRatio = withShoulders.length >= neutral.length / 2
+        ? median(withShoulders.map((f) => -f.headPos[2] * (f.shoulders as number)))
+        : null;
       eyeSensitivity = 0;
       mouthSensitivity = 0;
       step = "adjust";

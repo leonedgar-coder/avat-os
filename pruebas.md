@@ -310,7 +310,65 @@ Notas:
 
 ## Fase 1B — Cuerpo base (hombros)
 
-_(Se agregarán cuando se programe esta fase.)_
+Distinguir **inclinarse hacia el frente** de **acercarse a la cámara** mirando también los
+hombros.
+
+**Antes de empezar:**
+
+1. Cierra avat-os.
+2. Ejecuta `npm run fetch:tracking`: descarga el modelo de hombros (5,8 MB), solo la primera vez.
+3. Abre avat-os con `npm run tauri dev`.
+4. Siéntate como siempre, con tus **dos hombros a la vista** de la cámara.
+
+### 1B.1 Hombros y calibración
+
+- [x] **Indicador.** Enciende el tracking.
+  - Debe pasar: debajo de _Cara detectada_ dice **Hombros visibles**. Si tapas un hombro con la mano o te sales del cuadro por un lado, dice **Hombros: no se ven**; al volver, otra vez _visibles_.
+- [x] **Fluidez.** Con el tracking encendido, mira los **FPS**.
+  - Debe pasar: no bajan mucho comparado con antes (anota el número: antes / ahora). La cara del avatar sigue igual de fluida.
+- [x] **Recalibrar.** Pulsa **Recalibrar**, haz los 3 pasos con los hombros a la vista y pulsa **Guardar**.
+  - Debe pasar: se guarda como siempre (el paso 1 ahora mide también tus hombros).
+
+Notas: ~40 FPS con _Hombros visibles_ (fase 1: ~56). En una prueba con poca luz se vieron ~11:
+es la webcam, que baja sola sus cuadros por segundo; con buena luz vuelve a 30–50.
+
+### 1B.2 Inclinarse o acercarse (con los hombros a la vista)
+
+- [x] **Inclinarte hacia el frente.** Sin mover la silla, inclínate hacia la cámara y quédate así unos 5 segundos; luego vuelve.
+  - Debe pasar: el avatar **se inclina** (columna, pecho y cuello) y **no** se hace más grande; mientras sigues inclinado, no se acerca poco a poco. Al volver, se endereza.
+- [x] **Mirar a la pantalla inclinado.** Inclínate mirando la pantalla.
+  - Debe pasar: el avatar se inclina, pero su cara sigue mirando al frente (no al piso).
+- [x] **Acercarte de verdad.** Acerca la silla (o tu cuerpo entero) a la cámara y quédate ahí; luego vuelve.
+  - Debe pasar: el avatar se ve **más grande**, sin inclinarse; al volver, recupera su tamaño.
+- [x] **Girar el torso.** Gira el torso hacia un lado, sin acercarte ni alejarte.
+  - Debe pasar: el avatar **no** se aleja ni se achica.
+- [x] **Inclinarte a los lados.**
+  - Debe pasar: como antes, el torso se inclina contigo.
+
+Notas: al girar el torso el avatar se queda en su sitio (correcto). Que el avatar **gire** su
+torso contigo todavía no existe: es de la Fase 5 (movimiento del cuerpo).
+
+### 1B.3 Sin hombros (plan B)
+
+- [x] **Inclinación corta.** Tapa tus hombros o encuadra la cámara para que no se vean (debe decir _Hombros: no se ven_). Inclínate hacia el frente un segundo y vuelve.
+  - Debe pasar: el avatar se inclina y casi no se acerca.
+- [x] **Inclinación larga.** Igual, pero quédate inclinado unos 10 segundos.
+  - Debe pasar: al principio se inclina; después, poco a poco, en vez de inclinarse se acerca (sin saltos).
+- [x] **Perder y recuperar los hombros.** Inclinado, tapa y destapa un hombro varias veces.
+  - Debe pasar: el avatar no da saltos.
+
+Notas:
+
+### 1B.4 Repaso (que nada se haya roto)
+
+- [x] **Cabeza y ojos.** Gira la cabeza, parpadea, guiña y habla.
+  - Debe pasar: todo como al terminar la fase 1.
+- [x] **Sin tirones.** Quédate quieto un par de minutos.
+  - Debe pasar: el avatar no da saltos ni cambia de tamaño solo.
+- [x] **Todo se recuerda.** Cierra y abre avat-os.
+  - Debe pasar: la calibración nueva sigue (_calibrado_) y el avatar se comporta igual.
+
+Notas:
 
 ## Fase 2 — Escenas y fuentes
 

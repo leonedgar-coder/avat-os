@@ -53,6 +53,12 @@ pub struct Calibration {
     pub eye_sensitivity: f32,
     #[serde(default)]
     pub mouth_sensitivity: f32,
+    /// Distancia de la cara (cm) × ancho de los hombros (altos de imagen) de frente, medida en
+    /// el paso 1: distingue inclinarse de acercarse (avatar/body.ts). Una persona sentada a
+    /// 50 cm da ~15. `None` si no se vieron los hombros o en calibraciones antiguas (el avatar
+    /// la aprende sola).
+    #[serde(default)]
+    pub body_ratio: Option<f32>,
 }
 
 /// Valores que midió MediaPipe en cada paso del asistente (0–1).
@@ -85,6 +91,7 @@ impl Calibration {
                 && l.eye_noise.is_none_or(|[a, b]| unit(a) && unit(b))
         });
         let right_ok = self.eye_right.is_none_or(|[o, c]| unit(o) && unit(c) && o < c);
+        let body_ok = self.body_ratio.is_none_or(|r| r.is_finite() && (0.5..=500.0).contains(&r));
         unit(self.eye_open)
             && unit(self.eye_closed)
             && right_ok
@@ -95,6 +102,7 @@ impl Calibration {
             && sens(self.eye_sensitivity)
             && sens(self.mouth_sensitivity)
             && levels_ok
+            && body_ok
             && finite
     }
 }
@@ -208,6 +216,20 @@ mod tests {
         assert_eq!(cal.eye_sensitivity, 0.0);
         assert_eq!(cal.gaze_offset, [0.0, 0.0]);
         assert!(cal.eye_right.is_none());
+        assert!(cal.body_ratio.is_none());
+    }
+
+    #[test]
+    fn proporcion_del_cuerpo() {
+        let mut cal: Calibration = serde_json::from_str(OLD_FILE).unwrap();
+        cal.body_ratio = Some(16.5);
+        assert!(cal.is_valid());
+        let json = serde_json::to_string(&cal).unwrap();
+        assert!(json.contains("\"bodyRatio\":16.5"));
+        for bad in [0.0, -3.0, f32::NAN, f32::INFINITY, 9000.0] {
+            cal.body_ratio = Some(bad);
+            assert!(!cal.is_valid(), "debería rechazar {bad}");
+        }
     }
 
     /// Lo que envía el asistente nuevo al pulsar Guardar (umbrales y medidas por ojo).
